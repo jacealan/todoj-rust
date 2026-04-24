@@ -3,6 +3,7 @@ use clap::Parser;
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::io::Write;
 
 static DB_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -230,7 +231,42 @@ fn set_done(conn: &Connection, id: i64, done_level: Option<i32>) -> Result<(), S
     Ok(())
 }
 
-fn list_todos(conn: &Connection, show_done: bool, use_order: bool) -> Result<Vec<i64>, String> {
+fn parse_list_range(args: &[&str]) -> (Option<usize>, Option<usize>, Option<usize>, Option<usize>) {
+    let mut limit = None;
+    let mut page = None;
+    let mut range_start = None;
+    let mut range_end = None;
+
+    for arg in args {
+        if arg.contains('/') {
+            let parts: Vec<&str> = arg.split('/').collect();
+            if parts.len() == 2 {
+                if let Ok(l) = parts[0].parse() {
+                    limit = Some(l);
+                }
+                if let Ok(p) = parts[1].parse() {
+                    page = Some(p);
+                }
+            }
+        } else if arg.contains('-') {
+            let parts: Vec<&str> = arg.split('-').collect();
+            if parts.len() == 2 {
+                if let Ok(s) = parts[0].parse() {
+                    range_start = Some(s);
+                }
+                if let Ok(e) = parts[1].parse() {
+                    range_end = Some(e);
+                }
+            }
+        } else if let Ok(n) = arg.parse::<usize>() {
+            limit = Some(n);
+        }
+    }
+
+    (limit, page, range_start, range_end)
+}
+
+fn list_todos(conn: &Connection, show_done: bool, use_order: bool, limit: Option<usize>, page: Option<usize>, range: (Option<usize>, Option<usize>)) -> Result<Vec<i64>, String> {
     let mut stmt = conn.prepare(
         "SELECT id, todo, due_date, priority, up_id, done, done_at
          FROM todos WHERE deleted_at IS NULL
@@ -268,10 +304,13 @@ fn list_todos(conn: &Connection, show_done: bool, use_order: bool) -> Result<Vec
     if show_done {
         flags.push_str(" show");
     }
-    println!("=== TODO{} ===", if flags.is_empty() { String::new() } else { flags });
+
+    let mut output = String::new();
+    output.push_str(&format!("=== TODO{} ===\n", if flags.is_empty() { String::new() } else { flags }));
 
     if incomplete.is_empty() && (!show_done || completed.is_empty()) {
-        println!("TODO가 없습니다.");
+        output.push_str("TODO가 없습니다.\n");
+        print!("{}", output);
         return Ok(Vec::new());
     }
 
@@ -312,20 +351,52 @@ fn list_todos(conn: &Connection, show_done: bool, use_order: bool) -> Result<Vec
 
     let mut display_ids = Vec::new();
 
+    let (items_to_show, (range_start, range_end)) = {
+        let (rs, re) = range;
+        let total_incomplete = display_incomplete.len();
+        let total_completed = if show_done { display_completed.len() } else { 0 };
+        let total = total_incomplete + total_completed;
+
+        if let Some(start) = rs {
+            let end = re.unwrap_or(total);
+            (Some((start, end)), (Some(start), Some(end)))
+        } else if let (Some(lim), Some(p)) = (limit, page) {
+            let start_idx = (p - 1) * lim;
+            let end_idx = start_idx + lim;
+            (Some((start_idx + 1, end_idx.min(total))), (None, None))
+        } else if let Some(lim) = limit {
+            let end_idx = lim.min(total);
+            (Some((1, end_idx)), (None, None))
+        } else {
+            (None, (None, None))
+        }
+    };
+
     if !display_incomplete.is_empty() {
         let max_num = display_incomplete.len();
         let width = max_num.to_string().len();
-        for (idx, item) in &display_incomplete {
-            display_ids.push(item.0);
+
+        let filtered: Vec<_> = match items_to_show {
+            Some((start, end)) => display_incomplete.iter().enumerate()
+                .filter(|(idx, _)| {
+                    let num = idx + 1;
+                    num >= start && num <= end
+                })
+                .collect(),
+            None => display_incomplete.iter().enumerate().collect(),
+        };
+
+        for (idx, item) in &filtered {
+            display_ids.push(item.1.0);
         }
-        for (idx, item) in &display_incomplete {
-            print_todo(*idx + 1, width, item, false, &display_ids, use_order);
+        for (idx, item) in &filtered {
+            output.push_str(&format_todo(*idx + 1, width, &item.1, false, &display_ids, use_order));
         }
     }
 
     if show_done && !display_completed.is_empty() {
         if incomplete_len > 0 {
-            println!();
+            output.push('\n');
         }
         let mut sorted_completed = display_completed;
         sorted_completed.sort_by(|a, b| {
@@ -339,16 +410,19 @@ fn list_todos(conn: &Connection, show_done: bool, use_order: bool) -> Result<Vec
             display_ids.push(item.0);
         }
         for (idx, item) in &sorted_completed {
-            print_todo(start_num + idx, width, item, true, &display_ids, use_order);
+            output.push_str(&format_todo(start_num + idx, width, item, true, &display_ids, use_order));
         }
     }
+
+    print!("{}", output);
+    std::io::stdout().flush().ok();
 
     Ok(display_ids)
 }
 
 
 
-fn print_todo(num: usize, width: usize, item: &(i64, String, Option<String>, i32, Option<i64>, i32, Option<String>), is_done: bool, display_ids: &[i64], use_order: bool) {
+fn format_todo(num: usize, width: usize, item: &(i64, String, Option<String>, i32, Option<i64>, i32, Option<String>), is_done: bool, display_ids: &[i64], use_order: bool) -> String {
     let (id, todo, due_date, priority, up_id, done, done_at) = item;
     let num_str = format!("{}", num);
     let padded_num = format!("{:>width$}", num_str);
@@ -390,7 +464,11 @@ fn print_todo(num: usize, width: usize, item: &(i64, String, Option<String>, i32
         String::new()
     };
 
-    println!("{}{} {} {} {}{} {}{} ^{}{}", padded_num, indent, check, parent_str, todo, due_str, progress, "", priority, done_str);
+    format!("{}{} {} {} {}{} {}{} ^{}{}\n", padded_num, indent, check, parent_str, todo, due_str, progress, "", priority, done_str)
+}
+
+fn print_todo(num: usize, width: usize, item: &(i64, String, Option<String>, i32, Option<i64>, i32, Option<String>), is_done: bool, display_ids: &[i64], use_order: bool) {
+    print!("{}", format_todo(num, width, item, is_done, display_ids, use_order));
 }
 
 fn main() {
@@ -405,7 +483,7 @@ fn main() {
     };
 
     if args.list_mode {
-        let _ = list_todos(&conn, false, false);
+        let _ = list_todos(&conn, false, false, None, None, (None, None));
         return;
     }
 
@@ -414,7 +492,7 @@ fn main() {
 
     fn redraw(conn: &Connection, show_done: bool, use_order: bool) -> Vec<i64> {
         clear_screen();
-        list_todos(conn, show_done, use_order).unwrap_or_default()
+        list_todos(conn, show_done, use_order, None, None, (None, None)).unwrap_or_default()
     }
 
     let mut display_ids = redraw(&conn, show_done, use_order);
@@ -516,8 +594,10 @@ fn main() {
                 }
             }
             "list" | "l" => {
-                if let Err(e) = list_todos(&conn, show_done, use_order) {
-                    println!("{}", e);
+                let (limit, page, range_start, range_end) = parse_list_range(&rest);
+                match list_todos(&conn, show_done, use_order, limit, page, (range_start, range_end)) {
+                    Ok(ids) => { display_ids = ids; }
+                    Err(e) => println!("{}", e),
                 }
             }
             "order" | "o" => {
@@ -554,15 +634,18 @@ fn clear_screen() {
 fn print_help() {
     println!(r#"
 Commands:
-  add <내용> [-d 날짜] [-p 우선순위] [-u 상위ID]  - TODO 추가
-  edit <ID> [-d 날짜] [-p 우선순위] [-u 상위ID]   - TODO 수정
-  remove <ID>                            - TODO 삭제
-  done <ID> [0-5]                        - 완료 상태 변경
-  list (l)                               - 리스트 보기
-  order (o)                              - 순서 적용 리스트
-  show (s)                               - 완료 포함 리스트
-  help (h)                               - 도움말
-  quit (q)                               - 종료
+  add <내용> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 추가
+  edit <리스트번호> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 수정
+  remove <리스트번호>                       - TODO 삭제
+  done <리스트번호> [0-5]                   - 완료 상태 변경
+  list (l) [n|/n/p/|-n]                    - 리스트 보기
+      n    : n개만 보기
+      n/p  : n개씩 페이징, p번째 페이지
+      n-m  : n~m번 보기
+  order (o)                               - 순서 적용 토글
+  show (s)                                - 완료 포함 토글
+  help (h)                                - 도움말
+  quit (q)                                - 종료
 "#);
 }
 
