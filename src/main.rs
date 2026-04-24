@@ -145,6 +145,29 @@ fn add_todo(conn: &Connection, args: &[&str], display_ids: &[i64]) -> Result<(),
     Ok(())
 }
 
+fn edit_batch(conn: &Connection, ids: &[i64], due_date: Option<String>, priority: Option<i32>) -> Result<(), String> {
+    let updated = now_datetime();
+    for id in ids {
+        let mut stmt = conn.prepare("SELECT due_date, priority FROM todos WHERE id = ?1 AND deleted_at IS NULL")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(params![id]).map_err(|e| e.to_string())?;
+
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let current_due: Option<String> = row.get(0).unwrap_or(None);
+            let current_priority: i32 = row.get(1).unwrap_or(3);
+            let new_due = due_date.clone().or(current_due);
+            let new_priority = priority.unwrap_or(current_priority);
+
+            conn.execute(
+                "UPDATE todos SET due_date = ?1, priority = ?2, updated_at = ?3 WHERE id = ?4",
+                params![new_due, new_priority, updated, id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    println!("수정되었습니다.");
+    Ok(())
+}
+
 fn edit_todo(conn: &Connection, id: i64, args: &[&str], display_ids: &[i64]) -> Result<(), String> {
     let mut stmt = conn.prepare("SELECT id, todo, due_date, priority, up_id FROM todos WHERE id = ?1 AND deleted_at IS NULL")
         .map_err(|e| e.to_string())?;
@@ -579,11 +602,51 @@ fn main() {
             }
             "edit" | "e" => {
                 if rest.is_empty() {
-                    println!("사용법: edit <리스트번호> [-d 날짜] [-p 우선순위] [-u 리스트번호]");
+                    println!("사용법: edit <리스트번호>[,...] [-d 날짜] [-p 우선순위]");
+                } else if rest.len() > 1 {
+                    let nums = parse_numbers(rest[0]);
+                    let mut valid_ids = Vec::new();
+                    let mut invalid = false;
+                    for n in &nums {
+                        if *n == 0 || *n > display_ids.len() {
+                            invalid = true;
+                            break;
+                        }
+                        valid_ids.push(display_ids[n - 1]);
+                    }
+                    if invalid || valid_ids.is_empty() {
+                        println!("유효한 리스트 번호를 입력해주세요.");
+                    } else {
+                        let mut due_date: Option<String> = None;
+                        let mut priority: Option<i32> = None;
+                        let mut i = 1;
+                        while i < rest.len() {
+                            match rest[i] {
+                                "-d" if i + 1 < rest.len() => {
+                                    due_date = parse_date(rest[i + 1]);
+                                    i += 2;
+                                }
+                                "-p" if i + 1 < rest.len() => {
+                                    priority = rest[i + 1].parse().ok();
+                                    i += 2;
+                                }
+                                _ => {
+                                    i += 1;
+                                }
+                            }
+                        }
+                        if due_date.is_none() && priority.is_none() {
+                            println!("-d 또는 -p를 입력해주세요.");
+                        } else if let Err(e) = edit_batch(&conn, &valid_ids, due_date, priority) {
+                            println!("{}", e);
+                        } else {
+                            needs_redraw = true;
+                        }
+                    }
                 } else if let Ok(num) = rest[0].parse::<usize>() {
                     if num == 0 || num > display_ids.len() {
                         println!("유효한 리스트 번호를 입력해주세요.");
-                    } else if rest.len() == 1 {
+                    } else {
                         println!("사용법: edit {} <새 내용> [-d 날짜] [-p 우선순위] [-u 리스트번호>", num);
                         print!("수정: ");
                         std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -600,12 +663,6 @@ fn main() {
                                     needs_redraw = true;
                                 }
                             }
-                        }
-                    } else {
-                        if let Err(e) = edit_todo(&conn, display_ids[num - 1], &rest[1..], &display_ids) {
-                            println!("{}", e);
-                        } else {
-                            needs_redraw = true;
                         }
                     }
                 } else {
