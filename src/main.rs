@@ -231,6 +231,58 @@ fn set_done(conn: &Connection, id: i64, done_level: Option<i32>) -> Result<(), S
     Ok(())
 }
 
+fn remove_todos(conn: &Connection, ids: &[i64]) -> Result<(), String> {
+    let deleted = now_datetime();
+    for id in ids {
+        conn.execute(
+            "UPDATE todos SET deleted_at = ?1 WHERE id = ?2",
+            params![deleted, id],
+        ).map_err(|e| e.to_string())?;
+    }
+    println!("삭제되었습니다.");
+    Ok(())
+}
+
+fn set_done_batch(conn: &Connection, ids: &[i64], level: Option<i32>) -> Result<(), String> {
+    for id in ids {
+        let mut stmt = conn.prepare("SELECT done FROM todos WHERE id = ?1 AND deleted_at IS NULL")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(params![id]).map_err(|e| e.to_string())?;
+
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let current_done: i32 = row.get(0).unwrap_or(0);
+            let new_done = level.unwrap_or(if current_done == 5 { 0 } else { 5 });
+            let done_at = if new_done == 5 { Some(now_date()) } else { None };
+
+            conn.execute(
+                "UPDATE todos SET done = ?1, done_at = ?2 WHERE id = ?3",
+                params![new_done, done_at, id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    println!("완료 상태가 변경되었습니다.");
+    Ok(())
+}
+
+fn parse_numbers(input: &str) -> Vec<usize> {
+    let mut numbers = Vec::new();
+    for part in input.split(',') {
+        if part.contains('-') {
+            let range_parts: Vec<&str> = part.split('-').collect();
+            if range_parts.len() == 2 {
+                if let (Ok(start), Ok(end)) = (range_parts[0].parse(), range_parts[1].parse()) {
+                    for i in start..=end {
+                        numbers.push(i);
+                    }
+                }
+            }
+        } else if let Ok(n) = part.parse() {
+            numbers.push(n);
+        }
+    }
+    numbers
+}
+
 fn parse_list_range(args: &[&str]) -> (Option<usize>, Option<usize>, Option<usize>, Option<usize>) {
     let mut limit = None;
     let mut page = None;
@@ -562,35 +614,49 @@ fn main() {
             }
             "remove" | "r" => {
                 if rest.is_empty() {
-                    println!("사용법: remove <리스트번호>");
-                } else if let Ok(num) = rest[0].parse::<usize>() {
-                    if num == 0 || num > display_ids.len() {
+                    println!("사용법: remove <리스트번호>[,...]");
+                } else {
+                    let nums = parse_numbers(rest[0]);
+                    let mut valid_ids = Vec::new();
+                    let mut invalid = false;
+                    for n in &nums {
+                        if *n == 0 || *n > display_ids.len() {
+                            invalid = true;
+                            break;
+                        }
+                        valid_ids.push(display_ids[n - 1]);
+                    }
+                    if invalid || valid_ids.is_empty() {
                         println!("유효한 리스트 번호를 입력해주세요.");
-                    } else if let Err(e) = remove_todo(&conn, display_ids[num - 1]) {
+                    } else if let Err(e) = remove_todos(&conn, &valid_ids) {
                         println!("{}", e);
                     } else {
                         needs_redraw = true;
                     }
-                } else {
-                    println!("유효한 리스트 번호를 입력해주세요.");
                 }
             }
             "done" | "d" => {
                 if rest.is_empty() {
-                    println!("사용법: done <리스트번호> [0-5]");
-                } else if let Ok(num) = rest[0].parse::<usize>() {
-                    if num == 0 || num > display_ids.len() {
-                        println!("유효한 리스트 번호를 입력해주세요.");
-                    } else {
-                        let level = if rest.len() > 1 { rest[1].parse().ok() } else { None };
-                        if let Err(e) = set_done(&conn, display_ids[num - 1], level) {
-                            println!("{}", e);
-                        } else {
-                            needs_redraw = true;
-                        }
-                    }
+                    println!("사용법: done <리스트번호>[,...] [0-5]");
                 } else {
-                    println!("유효한 리스트 번호를 입력해주세요.");
+                    let nums = parse_numbers(rest[0]);
+                    let level = if rest.len() > 1 { rest[1].parse().ok() } else { None };
+                    let mut valid_ids = Vec::new();
+                    let mut invalid = false;
+                    for n in &nums {
+                        if *n == 0 || *n > display_ids.len() {
+                            invalid = true;
+                            break;
+                        }
+                        valid_ids.push(display_ids[n - 1]);
+                    }
+                    if invalid || valid_ids.is_empty() {
+                        println!("유효한 리스트 번호를 입력해주세요.");
+                    } else if let Err(e) = set_done_batch(&conn, &valid_ids, level) {
+                        println!("{}", e);
+                    } else {
+                        needs_redraw = true;
+                    }
                 }
             }
             "list" | "l" => {
@@ -636,16 +702,16 @@ fn print_help() {
 Commands:
   add <내용> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 추가
   edit <리스트번호> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 수정
-  remove <리스트번호>                       - TODO 삭제
-  done <리스트번호> [0-5]                   - 완료 상태 변경
-  list (l) [n|/n/p/|-n]                    - 리스트 보기
+  remove <리스트번호>[,...]              - TODO 삭제 (2,3,5 또는 7-9)
+  done <리스트번호>[,...] [0-5]          - 완료 상태 변경
+  list (l) [n|/n/p/|-n]                - 리스트 보기
       n    : n개만 보기
       n/p  : n개씩 페이징, p번째 페이지
       n-m  : n~m번 보기
-  order (o)                               - 순서 적용 토글
-  show (s)                                - 완료 포함 토글
-  help (h)                                - 도움말
-  quit (q)                                - 종료
+  order (o)                             - 순서 적용 토글
+  show (s)                              - 완료 포함 토글
+  help (h)                              - 도움말
+  quit (q)                              - 종료
 "#);
 }
 
