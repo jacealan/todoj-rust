@@ -37,7 +37,7 @@ mod formatters;
 use clap::Parser;
 use cli::{parse_command, parse_list_range, Args};
 use db::{SqliteRepo, Todo, TodoRepository};
-use formatters::{clear_screen, print_help};
+use formatters::{clear_screen, print_help, show_calendar, show_calendar_weeks, parse_calendar_args};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -470,6 +470,16 @@ fn main() {
                 let (todos, ids) = redraw(&repo, show_done, use_order);
                 display_ids = ids;
                 _all_todos = todos;
+            }
+            "calendar" | "c" => {
+                if rest.is_empty() {
+                    // No args: show 4 weeks from today
+                    show_calendar_weeks();
+                } else if let Some((year, month)) = parse_calendar_args(&rest) {
+                    show_calendar(year, month);
+                } else {
+                    println!("사용법: calendar [m] [y] 또는 calendar yy/mm");
+                }
             }
             "help" | "h" | "?" => {
                 print_help();

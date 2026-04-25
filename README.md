@@ -9,6 +9,7 @@ A simple yet powerful terminal-based TODO manager written in Rust.
 - **Priority Levels**: 1 (highest) to 4 (lowest), default 3
 - **Sub-todos**: Parent-child relationships with `-u` flag
 - **Progress Tracking**: 0%, 20%, 40%, 60%, 80%, 100%
+- **Calendar View**: 4 weeks or specific month display
 - **Flexible Display**: Order by due date, priority, or creation time
 - **Completed Filtering**: Show/hide completed todos
 - **Local SQLite Storage**: Zero-configuration local storage
@@ -28,12 +29,6 @@ cargo build --release
 cargo install --path .
 ```
 
-### Pre-built (future)
-
-```bash
-# Not yet available
-```
-
 ## Usage
 
 ### Interactive Mode
@@ -41,8 +36,8 @@ cargo install --path .
 ```bash
 $ todoj
 === TODO ===
-1 [ ]  Buy groceries  @26-03-20(금) ^3
-2 [ ]  Walk dog  @26-03-21(토) ^2
+1 [ ]  Buy groceries  @26-03-20 ^3
+2 [ ]  Walk dog  @26-03-21 ^2
 
 > add Finish report -d 3/25 -p 1
 추가되었습니다.
@@ -149,6 +144,37 @@ list 10/2
 list 3-5
 ```
 
+### calendar (c) - Show calendar
+
+```bash
+# Show 4 weeks from today (default)
+calendar
+
+# Show specific month (current year)
+calendar 4
+calendar 4
+
+# Show specific month/year
+calendar 4/2026
+calendar 25/3     # year 2025, month 3
+```
+
+**Calendar Display:**
+- Without arguments: Shows 4 weeks starting from today's week
+- Header shows month range: "2026/4 - 2026/5"
+- Today marked with ◉ before the date
+
+Example:
+```
+> calendar
+2026/4 - 2026/5
+Sun Mon Tue Wed Thu Fri Sat
+ 19  20  21  22  23  24 ◉25 
+ 26  27  28  29  30   1   2 
+  3   4   5   6   7   8   9 
+ 10  11  12  13  14  15 16 
+```
+
 ### order (o) - Toggle order mode
 
 Shows sub-todos under their parent todos:
@@ -210,27 +236,19 @@ CREATE TABLE todos (
 ## Display Format
 
 ```
-1 [ ] Parent task     @26-03-20(금) ^3
-2 [ ] 1> Sub-task   @26-03-21(토) ^3
-3 [x] Completed    %26-03-19(수) ^2   # Shows completion date
+1 [ ] Parent task     @26-03-20 ^3
+2 [ ] 1> Sub-task   @26-03-21 ^3
+3 [x] Completed    %26-03-19 ^2
 ```
 
 **Format:**
 - `N` - Line number (padded)
 - `[ ]` / `[x]` - Incomplete / Complete
 - `N>` - Parent reference
-- `@YY-MM-DD(W)` - Due date with weekday
+- `@YY-MM-DD` - Due date
 - `%XX` - Progress percentage
 - `%YY-MM-DD` - Completion date
-- `^N` - Priority
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection (future) | - |
+- `^N` - Priority (1=high, 4=low)
 
 ## Roadmap
 

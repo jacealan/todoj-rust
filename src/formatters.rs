@@ -2,6 +2,7 @@
 //! 
 //! This module provides common formatting and utility functions:
 //! - Date formatting (format_date, parse_date)
+//! - Calendar display (show_calendar)
 //! - Screen utilities (clear_screen)
 //! - Help display (print_help)
 
@@ -121,23 +122,225 @@ pub fn clear_screen() {
 /// Print help message
 /// 
 /// Displays all available commands with usage examples.
+/// Print help message
+/// 
+/// Displays all available commands with usage examples.
 /// Shown when user types "help", "h", or "?".
 pub fn print_help() {
     println!(
         r#"
 Commands:
-  add <내용> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 추가
-  edit <리스트번호> [-d 날짜] [-p 우선순위] [-u 리스트번호]  - TODO 수정
-  remove <리스트번호>[,...]              - TODO 삭제 (2,3,5 또는 7-9)
-  done <리스트번호>[,...] [0-5]          - 완료 상태 변경
-  list (l) [n|/n/p/|-n]                - 리스트 보기
-      n    : n개만 보기
-      n/p  : n개씩 페이징, p번째 페이지
-      n-m  : n~m번 보기
-  order (o)                             - 순서 적용 토글
-  show (s)                              - 완료 포함 토글
-  help (h)                              - 도움말
-  quit (q)                              - 종료
+  add <content> [-d date] [-p priority] [-u list#]   Add TODO
+  edit <list#> [-d date] [-p priority]              Edit TODO
+  remove <list#>[,...]                            Remove TODO (1,2-5, etc)
+  done <list#>[,...] [0-5]                        Set done level
+  list (l) [n|/n/p/|-n]                         Show todos
+      n    : show first n
+      n/p  : n per page, page p
+      n-m  : show n to m
+  calendar (c) [m] [y]                         Show calendar
+      no args: show 4 weeks from today
+      m     : show month (e.g., 4)
+      y/m   : show year/month (e.g., 25/3)
+  order (o)                                     Toggle parent-child order
+  show (s)                                      Toggle show completed
+  help (h)                                      Show this help
+  quit (q)                                      Quit
 "#
     );
+}
+
+/// Show calendar for a specific month and year
+/// 
+/// Displays a month calendar with Sunday as first day of week.
+/// Current day highlighted with ◉.
+/// 
+/// # Arguments
+/// * `year` - Year (4 digits)
+/// * `month` - Month (1-12)
+pub fn show_calendar(year: i32, month: u32) {
+    let first_day = match NaiveDate::from_ymd_opt(year, month, 1) {
+        Some(d) => d,
+        None => {
+            println!("잘못된 날짜입니다.");
+            return;
+        }
+    };
+    
+    let last_day = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap().pred_opt().unwrap().day()
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap().pred_opt().unwrap().day()
+    };
+    
+    let start_weekday = first_day.weekday().num_days_from_sunday() as usize;
+    
+    let today = Local::now().naive_local().date();
+    let is_current_month = today.year() == year && today.month() == month;
+    let today_day = if is_current_month { today.day() as u32 } else { 0 };
+    
+    let month_name = format!("{}/{}", year, month);
+    
+    println!("\n{}", month_name);
+    println!("Sun Mon Tue Wed Thu Fri Sat");
+    
+    for _ in 0..start_weekday {
+        print!("    ");
+    }
+    
+    let mut day = 1;
+    let mut pos = start_weekday;
+    while day <= last_day {
+        let cell = if is_current_month && day == today_day {
+            format!("◉{:>2}", day)
+        } else {
+            format!("{:>3}", day)
+        };
+        print!("{} ", cell);
+        
+        day += 1;
+        pos += 1;
+        
+        if pos > 6 {
+            println!();
+            pos = 0;
+        }
+    }
+    
+    if pos != 0 {
+        println!();
+    }
+}
+
+/// Calculate ISO week number for a given date
+/// 
+/// Displays 4 weeks (28 days) starting from the Sunday of current week.
+/// Header shows month range: "2026/4 - 2026/5"
+/// Current day highlighted with ◉ before the date.
+/// 
+pub fn show_calendar_weeks() {
+    let today = Local::now().naive_local().date();
+    
+    // Find Sunday of this week
+    let today_weekday = today.weekday().num_days_from_sunday() as i32;
+    let sunday = today - chrono::Duration::days(today_weekday as i64);
+    
+    // Collect dates for 4 weeks
+    let mut dates: Vec<NaiveDate> = Vec::new();
+    let mut current_date = sunday;
+    for _ in 0..28 {
+        dates.push(current_date);
+        current_date = current_date + chrono::Duration::days(1);
+    }
+    
+    // Find first and last month
+    let first_month = dates[0].month();
+    let last_month = dates[27].month();
+    
+// Print header with month range
+    if first_month == last_month {
+        println!("\n2026/{}", first_month);
+    } else {
+        println!("\n2026/{} - 2026/{}", first_month, last_month);
+    }
+    println!("Sun Mon Tue Wed Thu Fri Sat");
+    
+    // Print each day with ◉ before today
+    for (i, d) in dates.iter().enumerate() {
+        let day = d.day() as u32;
+        let is_today = *d == today;
+        
+        let cell = if is_today {
+            format!("◉{:>2}", day)  // ◉ + 2 digits = 3 chars
+        } else {
+            format!("{:>3}", day)   // space + 2 digits = 3 chars
+        };
+        print!("{} ", cell);  // adds space to make 4 chars total
+        
+        // New line after Saturday
+        if (i + 1) % 7 == 0 {
+            println!();
+        }
+    }
+    
+    if dates.len() % 7 != 0 {
+        println!();
+    }
+}
+
+/// Calculate ISO week number for a given date
+fn iso_week_number(year: i32, month: u32, day: u32) -> u32 {
+    let date = match NaiveDate::from_ymd_opt(year, month, day) {
+        Some(d) => d,
+        None => return 1,
+    };
+    let iso = date.format("%V").to_string();
+    iso.parse().unwrap_or(1)
+}
+
+/// Parse calendar arguments to year and month
+/// 
+/// Returns a tuple (year, month) for single month display.
+/// If no args, returns (year, month) of today's week start (for 4-week view).
+/// 
+/// # Arguments
+/// * `args` - Vector of string arguments
+/// 
+/// # Returns
+/// * `Some((year, month))` if valid
+/// * `None` if invalid
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// parse_calendar_args(&[]);           // (2026, 4) - this week's month
+/// parse_calendar_args(&["4"]);        // (2026, 4)
+/// parse_calendar_args(&["25/3"]);    // (2025, 3)
+/// parse_calendar_args(&["3", "2026"]);  // (2026, 3)
+/// ```
+pub fn parse_calendar_args(args: &[&str]) -> Option<(i32, u32)> {
+    let today = Local::now().naive_local().date();
+    let current_year = today.year();
+    let current_month = today.month();
+    
+    match args.len() {
+        0 => Some((current_year, current_month)),
+        1 => {
+            let parts: Vec<&str> = args[0].split(|c| c == '/' || c == '-').collect();
+            match parts.len() {
+                1 => {
+                    let month: u32 = parts[0].parse().ok()?;
+                    if month >= 1 && month <= 12 {
+                        Some((current_year, month))
+                    } else {
+                        None
+                    }
+                }
+                2 => {
+                    let part0: i32 = parts[0].parse().ok()?;
+                    let part1: i32 = parts[1].parse().ok()?;
+                    
+                    if part0 <= 12 {
+                        let year = if part1 < 100 { 2000 + part1 } else { part1 };
+                        Some((year, part0 as u32))
+                    } else {
+                        let year = if part0 < 100 { 2000 + part0 } else { part0 };
+                        Some((year, part1 as u32))
+                    }
+                }
+                _ => None,
+            }
+        }
+        2 => {
+            let month: u32 = args[0].parse().ok()?;
+            let year: i32 = args[1].parse().ok()?;
+            let full_year = if year < 100 { 2000 + year } else { year };
+            if month >= 1 && month <= 12 {
+                Some((full_year, month))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
