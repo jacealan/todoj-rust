@@ -51,8 +51,16 @@ fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
     let mut has_due_second_last = false;
     
     let looks_like_date = |s: &str| -> bool {
-        let inner = s.strip_prefix('@').unwrap_or(s);
-        inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())
+        let inner = s.strip_prefix('@').unwrap_or(s).to_lowercase();
+        inner == "today" || inner == "tom" || inner == "tomorrow" 
+            || inner == "mon" || inner == "monday"
+            || inner == "tue" || inner == "tuesday"
+            || inner == "wed" || inner == "wednesday"
+            || inner == "thu" || inner == "thursday"
+            || inner == "fri" || inner == "friday"
+            || inner == "sat" || inner == "saturday"
+            || inner == "sun" || inner == "sunday"
+            || inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())
     };
     
     if last.starts_with('@') && last.len() > 1 {
@@ -292,10 +300,11 @@ pub fn cmd_edit(
             valid_ids.push(display_ids[n - 1]);
         }
 
-        // Parse update options (including inline @date and ^priority)
+        // Parse update options (including inline @date and ^priority, and -u for parent)
         let mut raw_new_content: Option<String> = None;
         let mut due_date = None;
         let mut priority = None;
+        let mut up_id = None;
         let mut i = 1;
         while i < args.len() {
             match args[i] {
@@ -307,8 +316,16 @@ pub fn cmd_edit(
                     priority = args[i + 1].parse().ok();
                     i += 2;
                 }
+                "-u" if i + 1 < args.len() => {
+                    if let Ok(num) = args[i + 1].parse::<usize>() {
+                        if num > 0 && num <= display_ids.len() {
+                            up_id = Some(display_ids[num - 1]);
+                        }
+                    }
+                    i += 2;
+                }
                 _ => {
-                    // Collect for inline parsing
+                    // Collect other args as content
                     if raw_new_content.is_none() {
                         raw_new_content = Some(args[i].to_string());
                     } else {
@@ -319,42 +336,84 @@ pub fn cmd_edit(
             }
         }
 
-        // Parse inline @date and ^priority
-        if let Some(ref raw) = raw_new_content {
-            let (content, inline_due, inline_pri) = parse_inline(raw);
-            if !content.is_empty() {
-                // If content changed, use it (but this is batch mode, typically content stays same)
+        // Parse inline @date and ^priority (only if -d/-p NOT provided)
+        let use_inline = due_date.is_none() && priority.is_none();
+        let (content_changed, inline_due, inline_pri) = if let Some(ref raw) = raw_new_content {
+            if use_inline {
+                parse_inline(raw)
+            } else {
+                // Keep raw content when using -d/-p
+                (raw.clone(), None, None)
             }
-            
-            // Validate inline date
-            if inline_due.is_none() && due_date.is_none() {
-                let words: Vec<&str> = raw.split_whitespace().collect();
-                if let Some(last) = words.last() {
-                    if last.starts_with('@') && last.len() > 1 {
-                        let inner = last.strip_prefix('@').unwrap_or("");
-                        if inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit()) {
-                            return Err(format!("잘못된 날짜입니다: @{} - calendar 명령어로 확인하세요.", inner));
-                        }
+        } else {
+            (String::new(), None, None)
+        };
+        
+        // Validate inline date (only when using inline and -d not provided)
+        if use_inline && due_date.is_none() && raw_new_content.is_some() {
+            let raw = raw_new_content.as_ref().unwrap();
+            let words: Vec<&str> = raw.split_whitespace().collect();
+            if let Some(last) = words.last() {
+                if last.starts_with('@') && last.len() > 1 {
+                    let inner = last.strip_prefix('@').unwrap_or("");
+                    if (inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())) && inline_due.is_none() {
+                        return Err(format!("잘못된 날짜입니다: @{} - calendar 명령어로 확인하세요.", inner));
                     }
                 }
             }
-            
-            // Validate inline priority
-            if inline_pri.is_none() && priority.is_none() {
-                let words: Vec<&str> = raw.split_whitespace().collect();
-                if let Some(last) = words.last() {
-                    if last.starts_with('^') && last.len() > 1 {
-                        let p_str = &last[1..];
-                        if p_str.parse::<i32>().is_err() || p_str.parse::<i32>().map(|p| p < 1 || p > 4).unwrap_or(true) {
-                            return Err("잘못된 우선순위입니다. ^1, ^2, ^3, ^4 중 하나를 입력해주세요.".to_string());
-                        }
-                    }
-                }
-            }
-            
-            due_date = due_date.or(inline_due);
-            priority = priority.or(inline_pri);
         }
+        
+        // Validate inline priority (only when using inline and -p not provided)
+        if use_inline && priority.is_none() && raw_new_content.is_some() {
+            let raw = raw_new_content.as_ref().unwrap();
+            let words: Vec<&str> = raw.split_whitespace().collect();
+            if let Some(last) = words.last() {
+                if last.starts_with('^') && last.len() > 1 {
+                    let p_str = &last[1..];
+                    if p_str.parse::<i32>().is_err() || p_str.parse::<i32>().map(|p| p < 1 || p > 4).unwrap_or(true) {
+                        return Err("잘못된 우선순위입니다. ^1, ^2, ^3, ^4 중 하나를 입력해주세요.".to_string());
+                    }
+                }
+            }
+        }
+        
+        // Use -d/-p if provided, otherwise inline values
+        let final_due = due_date.or(inline_due);
+        let final_pri = priority.or(inline_pri);
+        let final_up_id = up_id;
+        
+// Update todo content if:
+// 1. raw_new_content was provided AND
+// 2. Either of these is true:
+//    - inline patterns (@ or ^) were found (content_changed different from raw)
+//    - OR no @/^ patterns at all in raw (plain text content)
+// 3. IMPORTANT: @/^ pattern alone (e.g., "@today") should NOT update content
+let final_todo = if let Some(ref raw) = raw_new_content {
+    let has_inline_patterns = (raw.contains('@') || raw.contains('^')) && (content_changed != *raw);
+    let has_plain_text = !raw.contains('@') && !raw.contains('^');
+    
+    // Check if @/^ is alone (no other words in input)
+    // "e 11 @today" → ["e", "11", "@today"] → @today is the only non-number
+    // In this case, don't update content - only date/priority
+    let words: Vec<&str> = raw.split_whitespace().collect();
+    let other_words: Vec<&&str> = words.iter()
+        .filter(|w| !w.starts_with('@') && !w.starts_with('^'))
+        .collect();
+    let has_only_inline = other_words.is_empty() && !words.is_empty();
+    
+    if has_inline_patterns || has_plain_text {
+        if has_only_inline {
+            // Only @/^ present (e.g., "@today" alone) - don't update content
+            None
+        } else {
+            Some(content_changed)
+        }
+    } else {
+        None
+    }
+} else {
+    None
+};
 
         // Apply updates
         let mut updated = false;
@@ -362,10 +421,10 @@ pub fn cmd_edit(
             repo.update(
                 id,
                 UpdateTodo {
-                    todo: None,  // Content unchanged in batch mode
-                    due_date: due_date.clone(),
-                    priority,
-                    up_id: None,  // Parent unchanged
+                    todo: final_todo.clone(),
+                    due_date: final_due.clone(),
+                    priority: final_pri,
+                    up_id: final_up_id.clone(),
                 },
             )?;
             updated = true;
@@ -392,12 +451,21 @@ pub fn cmd_edit(
         if std::io::stdin().read_line(&mut input).is_ok() {
             let new_input = input.trim();
             if !new_input.is_empty() {
-                // Parse inline @date and ^priority
+                // Use inline parsing - it should extract content without @/^, leaving them as date/priority
                 let (content, due_date, priority) = parse_inline(new_input);
+                
+                // Update todo content if changed (parsed doesn't have @ or ^ at end)
+                let update_content = if !content.is_empty() {
+                    Some(content)
+                } else {
+                    // No inline patterns found, use full input as content
+                    Some(new_input.to_string())
+                };
+                
                 repo.update(
                     display_ids[num - 1],
                     UpdateTodo {
-                        todo: if content.is_empty() { None } else { Some(content) },
+                        todo: update_content,
                         due_date,
                         priority,
                         up_id: None,

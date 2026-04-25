@@ -5,15 +5,16 @@ A simple yet powerful terminal-based TODO manager written in Rust.
 ## Features
 
 - **CRUD Operations**: Add, edit, remove, and complete todos
-- **Due Date Tracking**: Flexible input formats (3/15, 2026/3/15, etc.)
+- **Due Date Tracking**: Flexible input formats (3/15, 2026/3/15, @today, @tom, etc.)
 - **Priority Levels**: 1 (highest) to 4 (lowest), default 3
-- **Sub-todos**: Parent-child relationships with `-u` flag
+- **Sub-todos**: Parent-child relationships with `-u` flag or inline format
 - **Progress Tracking**: 0%, 20%, 40%, 60%, 80%, 100%
 - **Calendar View**: 4 weeks or specific month display
 - **Flexible Display**: Order by due date, priority, or creation time
 - **Completed Filtering**: Show/hide completed todos
 - **Local SQLite Storage**: Zero-configuration local storage
 - **Cross-device Sync**: PostgreSQL support planned (future)
+- **Color Display**: Priority and due dates shown with colors
 
 ## Installation
 
@@ -66,32 +67,64 @@ todoj -l --show
 # Basic
 add Buy milk
 
-# With due date and priority
+# With due date and priority (using flags)
 add Finish report -d 3/25 -p 1
+
+# With due date and priority (inline format)
+add Finish report @3/25 ^1
+
+# Using keywords (today, tomorrow, weekday)
+add Task @today       # Today
+add Task @tom        # Tomorrow  
+add Task @mon        # Next Monday
+add Task @ tue      # Next Tuesday
+add Task @ fri      # Next Friday
 
 # As sub-task under todo #3
 add Sub-task -u 3
+
+# Mixed format
+add Task @today -p 2     # @today as date, -p for priority
+add Task -d 3/25 ^1     # -d for date, ^1 inline
 ```
 
 **Options:**
-- `-d DATE`: Due date (format: d, m/d, y/m/d)
+- `-d DATE`: Due date (format: d, m/d, y/m/d, or keywords: today, tom, mon, tue, wed, thu, fri, sat, sun)
 - `-p PRIORITY`: Priority 1-4 (default 3)
 - `-u N`: Parent todo number (creates sub-task)
+
+**Inline format (at end of content):**
+- `@DATE` - Due date (e.g., `@3/15`, `@today`, `@mon`)
+- `^PRIORITY` - Priority 1-4 (e.g., `^1`, `^2`)
 
 ### edit (e) - Edit todo
 
 ```bash
-# Batch edit: change due date and priority
+# Batch edit: change due date and priority (using flags)
 edit 1,2 -d 3/30 -p 2
+
+# Batch edit: change using inline format
+edit 1,2 @3/30 ^2
+
+# Batch edit: change parent (sub-task)
+edit 1 -u 3
+
+# Batch edit: change content only
+edit 1,2 New content here
 
 # Interactive edit: prompts for new content
 edit 1
-수정: Updated content here
+수정: Updated content @3/15 ^1
 ```
 
 **Options:**
 - `-d DATE`: New due date
-- `-p PRIORITY`: New priority
+- `-p PRIORITY`: New priority (1-4)
+- `-u N`: Change parent todo number
+
+**Inline format (for batch edit):**
+- `@DATE` - Due date
+- `^PRIORITY` - Priority 1-4
 
 ### remove (r) - Delete todo
 
@@ -203,6 +236,7 @@ Due date supports flexible input:
 | Month/Day | 3/15 or 3-15 | 2026-03-15 (this year) |
 | Year/Month/Day | 26/3/15 | 2026-03-15 |
 | Full | 2026/3/15 | 2026-03-15 |
+| Keywords | @today, @tom, @mon | Today, Tomorrow, Next Monday |
 
 ## Database
 
@@ -244,11 +278,28 @@ CREATE TABLE todos (
 **Format:**
 - `N` - Line number (padded)
 - `[ ]` / `[x]` - Incomplete / Complete
-- `N>` - Parent reference
+- `N>` - Parent reference (gray)
 - `@YY-MM-DD` - Due date
 - `%XX` - Progress percentage
 - `%YY-MM-DD` - Completion date
 - `^N` - Priority (1=high, 4=low)
+
+## Color Legend
+
+### Due Date Colors (@)
+| Color | Meaning |
+|-------|----------|
+| Red | Today or overdue |
+| Yellow | Within 7 days |
+| Green | Future |
+
+### Priority Colors (^)
+| Color | Priority |
+|-------|----------|
+| Orange | ^1 (highest) |
+| Blue | ^2 |
+| Green | ^3 (default) |
+| Gray | ^4 (lowest) |
 
 ## Roadmap
 

@@ -188,9 +188,44 @@ pub fn parse_date(input: &str) -> Option<String> {
     if lower == "tomorrow" || lower == "tom" {
         return Some((today + chrono::Duration::days(1)).format("%Y%m%d").to_string());
     }
-    if lower == "mon" {
-        let days_until_monday = (7 - today.weekday().num_days_from_monday()) % 7;
-        return Some((today + chrono::Duration::days(days_until_monday as i64)).format("%Y%m%d").to_string());
+    
+    // Weekday keywords: find next occurrence of that day
+    let weekday_to_num = |wd: chrono::Weekday| -> u32 {
+        match wd {
+            chrono::Weekday::Sun => 0,
+            chrono::Weekday::Mon => 1,
+            chrono::Weekday::Tue => 2,
+            chrono::Weekday::Wed => 3,
+            chrono::Weekday::Thu => 4,
+            chrono::Weekday::Fri => 5,
+            chrono::Weekday::Sat => 6,
+        }
+    };
+    
+    let weekday_map: &[(&str, chrono::Weekday)] = &[
+        ("sun", chrono::Weekday::Sun),
+        ("mon", chrono::Weekday::Mon),
+        ("tue", chrono::Weekday::Tue),
+        ("wed", chrono::Weekday::Wed),
+        ("thu", chrono::Weekday::Thu),
+        ("fri", chrono::Weekday::Fri),
+        ("sat", chrono::Weekday::Sat),
+    ];
+    
+    for (keyword, target_day) in weekday_map {
+        if lower == *keyword || lower == format!("{}s", keyword) {
+            let today_wd = today.weekday();
+            let today_num = weekday_to_num(today_wd);
+            let target_num = weekday_to_num(*target_day);
+            let days_until = if target_num == today_num {
+                7 // Next week if today is the same day
+            } else if target_num > today_num {
+                (target_num - today_num) as i64
+            } else {
+                (7 - today_num + target_num) as i64
+            };
+            return Some((today + chrono::Duration::days(days_until)).format("%Y%m%d").to_string());
+        }
     }
     
     let parts: Vec<&str> = input.split(|c| c == '/' || c == '-').collect();
@@ -294,21 +329,35 @@ pub fn print_help() {
         r#"
 Commands:
   add <content> [-d date] [-p priority] [-u list#]   Add TODO
+      @DATE : inline date (e.g., @3/15, @today, @tom)
+      ^N   : inline priority (e.g., ^1, ^4)
+
   edit <list#> [-d date] [-p priority]              Edit TODO
+      @DATE : inline date, ^N : inline priority
+
   remove <list#>[,...]                            Remove TODO (1,2-5, etc)
+
   done <list#>[,...] [0-5]                        Set done level
+
   list (l) [n|/n/p/|-n]                         Show todos
       n    : show first n
       n/p  : n per page, page p
       n-m  : show n to m
+
   calendar (c) [m] [y]                         Show calendar
       no args: show 4 weeks from today
       m     : show month (e.g., 4)
       y/m   : show year/month (e.g., 25/3)
+
   order (o)                                     Toggle parent-child order
   show (s)                                      Toggle show completed
   help (h)                                      Show this help
   quit (q)                                      Quit
+
+Date: d, m/d, y/m/d (e.g., 15, 3/15, 26/3/15)
+Keywords: @today, @tom (tomorrow), @mon/@tue/@wed/@thu/@fri/@sat/@sun
+Priority: 1 (highest) to 4 (lowest), default 3
+Done levels: 0 (not started) to 5 (complete)
 "#
     );
 }
