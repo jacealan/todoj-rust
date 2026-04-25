@@ -95,43 +95,52 @@ fn format_todo(
     } else {
         None
     };
-    let parent_str = parent_ref.map(|p| format!("{p}>")).unwrap_or_default();
+    let parent_str = parent_ref.map(|p| format!("{}> ", p)).unwrap_or_default();
 
-    // Format due date
-    let due = item.due_date.as_ref().and_then(|d| formatters::format_date(d));
-    let due_str = due.map(|d| format!(" @{d}")).unwrap_or_default();
+// Format due date with color (@date - both @ and date colored)
+    let due_str = if let Some(ref d) = item.due_date {
+        let color = formatters::color_for_due_date(d);
+        let date = formatters::format_date(d).unwrap_or_default();
+        if color.is_empty() {
+            format!(" @{}", date)
+        } else {
+            format!(" {}@{}{}", color, date, "\x1b[0m")
+        }
+    } else {
+        String::new()
+    };
 
-    // Show progress percentage for incomplete todos with progress
+    // Format priority with color (^number - both ^ and number colored)
+    let priority_colors = ["\x1b[38;2;235;137;53m", "\x1b[38;2;59;130;246m", "\x1b[38;2;52;211;153m", "\x1b[38;2;156;163;175m"];
+    let pri_color = *priority_colors.get((item.priority - 1) as usize).unwrap_or(&"");
+    let priority_str = if pri_color.is_empty() {
+        format!(" ^{}", item.priority)
+    } else {
+        format!(" {}^{}{}", pri_color, item.priority, "\x1b[0m")
+    };
+
+    // Show progress percentage for incomplete todos (after priority)
     let progress = if !is_done && item.done > 0 {
         format!(" {}%", (item.done as usize) * 20)
     } else {
         String::new()
     };
 
-    // Format done date for completed todos
+    // Format done date for completed todos (%)
     let done_str = if is_done {
-        item.done_at
-            .as_ref()
-            .and_then(|dt| formatters::format_date(dt))
-            .map(|formatted| format!(" %{}", formatted))
+        item.done_at.as_ref().and_then(|dt| formatters::format_date(dt))
+            .map(|d| format!(" %{}{}", d, "\x1b[0m"))
             .unwrap_or_default()
     } else {
         String::new()
     };
 
-    format!(
-        "{}{} {} {} {}{} {}{} ^{}{}\n",
-        padded_num,
-        indent,
-        check,
-        parent_str,
-        item.todo,
-        due_str,
-        progress,
-        "",
-        item.priority,
-        done_str
+format!(
+        "{}{} {} {}{}{}{}{}{}\n",
+        padded_num, indent, check, parent_str,
+        item.todo, due_str, priority_str, progress, done_str
     )
+
 }
 
 /// List todos with various display options

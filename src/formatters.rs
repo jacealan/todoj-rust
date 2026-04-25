@@ -2,11 +2,112 @@
 //! 
 //! This module provides common formatting and utility functions:
 //! - Date formatting (format_date, parse_date)
+//! - Color support (colors for priority and due dates)
 //! - Calendar display (show_calendar)
 //! - Screen utilities (clear_screen)
 //! - Help display (print_help)
 
 use chrono::{Datelike, Local, NaiveDate};
+
+/// ANSI color codes for terminal output
+pub mod colors {
+    /// Reset color to default
+    pub const RESET: &str = "\x1b[0m";
+    
+    /// Bold reset
+    pub const BOLD_RESET: &str = "\x1b[0;1m";
+    
+    // Priority colors (softer)
+    /// Priority 1 - Soft orange
+    pub const PRIORITY_1: &str = "\x1b[38;2;235;137;53m"; // #EB8935
+    /// Priority 2 - Soft blue  
+    pub const PRIORITY_2: &str = "\x1b[38;2;59;130;246m"; // #3B82F6
+    /// Priority 3 - Soft green
+    pub const PRIORITY_3: &str = "\x1b[38;2;52;211;153m"; // #34D399
+    /// Priority 4 - Soft gray
+    pub const PRIORITY_4: &str = "\x1b[38;2;156;163;175m"; // #9CA3AF
+    
+    // Due date colors (softer)
+    /// Today/overdue - Soft red
+    pub const DUE_TODAY: &str = "\x1b[38;2;239;68;68m";   // #EF4444
+    /// This week - Soft yellow
+    pub const DUE_WEEK: &str = "\x1b[38;2;251;191;36m";   // #FBBF24
+    /// Future - Soft green
+    pub const DUE_FUTURE: &str = "\x1b[38;2;34;197;94m";    // #22C55E
+    
+    // Done color
+    /// Completed - Soft green
+    pub const DONE: &str = "\x1b[38;2;52;211;153m";      // #34D399
+}
+
+/// Get color for priority level
+/// 
+/// # Arguments
+/// * `priority` - Priority level (1-4)
+/// 
+/// # Returns
+/// * ANSI color code
+pub fn color_for_priority(priority: i32) -> &'static str {
+    match priority {
+        1 => colors::PRIORITY_1,
+        2 => colors::PRIORITY_2,
+        3 => colors::PRIORITY_3,
+        4 => colors::PRIORITY_4,
+        _ => colors::RESET,
+    }
+}
+
+/// Get color for due date
+/// 
+/// Compares due date with today to determine color:
+/// - Today or past: red (overdue)
+/// - This week (within 7 days): yellow
+/// - Future: no color
+/// 
+/// # Arguments
+/// * `due_date` - Due date in "YYYYMMDD" format
+/// 
+/// # Returns
+/// * ANSI color code
+pub fn color_for_due_date(due_date: &str) -> &'static str {
+    if let (Ok(year), Ok(month), Ok(day)) = (
+        due_date[..4].parse(),
+        due_date[4..6].parse(),
+        due_date[6..8].parse(),
+    ) {
+        if let Some(due) = NaiveDate::from_ymd_opt(year, month, day) {
+            let today = Local::now().naive_local().date();
+            let days_until = (due - today).num_days();
+            
+            if days_until <= 0 {
+                colors::DUE_TODAY  // Today or overdue
+            } else if days_until <= 7 {
+                colors::DUE_WEEK   // Within 7 days
+            } else {
+                colors::DUE_FUTURE // Future
+            }
+        } else {
+            colors::DUE_FUTURE
+        }
+    } else {
+        colors::DUE_FUTURE
+    }
+}
+
+/// Get color for done status
+/// 
+/// # Arguments
+/// * `done` - Done level (0-5)
+/// 
+/// # Returns
+/// * ANSI color code (green if done=5)
+pub fn color_for_done(done: i32) -> &'static str {
+    if done == 5 {
+        colors::DONE
+    } else {
+        colors::RESET
+    }
+}
 
 /// Get current datetime as formatted string
 /// 

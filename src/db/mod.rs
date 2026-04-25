@@ -12,7 +12,6 @@
 mod sqlite;
 
 pub use sqlite::SqliteRepo;
-pub use sqlite::PostgresRepo;
 
 use serde::{Deserialize, Serialize};
 
