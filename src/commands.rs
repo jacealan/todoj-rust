@@ -60,6 +60,10 @@ fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
             || inner == "fri" || inner == "friday"
             || inner == "sat" || inner == "saturday"
             || inner == "sun" || inner == "sunday"
+            // Korean keywords
+            || inner == "오늘" || inner == "jntn"
+            || inner == "내일" || inner == "tkfq"
+            || inner == "월" || inner == "화" || inner == "수" || inner == "목" || inner == "금" || inner == "토" || inner == "일"
             || inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())
     };
     

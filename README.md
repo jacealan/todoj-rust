@@ -237,6 +237,7 @@ Due date supports flexible input:
 | Year/Month/Day | 26/3/15 | 2026-03-15 |
 | Full | 2026/3/15 | 2026-03-15 |
 | Keywords | @today, @tom, @mon | Today, Tomorrow, Next Monday |
+| Korean | @오늘, @내일, @월 | Today, Tomorrow, Next Monday |
 
 ## Database
 

@@ -179,14 +179,69 @@ pub fn format_date(date_str: &str) -> Option<String> {
 /// ```
 pub fn parse_date(input: &str) -> Option<String> {
     let today = Local::now().naive_local().date();
+    let today_wd = today.weekday();
     
-    // Handle special keywords
+    // Helper to convert weekday to number (Mon=1, Tue=2, ..., Sun=7)
+    let weekday_to_num = |wd: chrono::Weekday| -> u32 {
+        match wd {
+            chrono::Weekday::Mon => 1,
+            chrono::Weekday::Tue => 2,
+            chrono::Weekday::Wed => 3,
+            chrono::Weekday::Thu => 4,
+            chrono::Weekday::Fri => 5,
+            chrono::Weekday::Sat => 6,
+            chrono::Weekday::Sun => 7,
+        }
+    };
+    
+    // Handle special keywords (English and Korean)
     let lower = input.to_lowercase();
+    
+    // English keywords
     if lower == "today" {
         return Some(today.format("%Y%m%d").to_string());
     }
     if lower == "tomorrow" || lower == "tom" {
         return Some((today + chrono::Duration::days(1)).format("%Y%m%d").to_string());
+    }
+    
+    // Korean keywords
+    if lower == "오늘" || lower == "jntn" {
+        return Some(today.format("%Y%m%d").to_string());
+    }
+    if lower == "내일" || lower == "tkfq" {
+        return Some((today + chrono::Duration::days(1)).format("%Y%m%d").to_string());
+    }
+    
+    // Weekday keywords mapping
+    let weekday_data: &[(&str, chrono::Weekday)] = &[
+        ("월", chrono::Weekday::Mon),
+        ("화", chrono::Weekday::Tue),
+        ("수", chrono::Weekday::Wed),
+        ("목", chrono::Weekday::Thu),
+        ("금", chrono::Weekday::Fri),
+        ("토", chrono::Weekday::Sat),
+        ("일", chrono::Weekday::Sun),
+        ("mon", chrono::Weekday::Mon),
+        ("tue", chrono::Weekday::Tue),
+        ("wed", chrono::Weekday::Wed),
+        ("thu", chrono::Weekday::Thu),
+        ("fri", chrono::Weekday::Fri),
+        ("sat", chrono::Weekday::Sat),
+        ("sun", chrono::Weekday::Sun),
+    ];
+    
+    for (keyword, target_wd) in weekday_data {
+        if lower == *keyword {
+            let today_num = weekday_to_num(today_wd);
+            let target_num = weekday_to_num(*target_wd);
+            let days_until = if target_num > today_num {
+                (target_num - today_num) as i64
+            } else {
+                (7 - today_num + target_num) as i64
+            };
+            return Some((today + chrono::Duration::days(days_until)).format("%Y%m%d").to_string());
+        }
     }
     
     // Weekday keywords: find next occurrence of that day
@@ -356,6 +411,7 @@ Commands:
 
 Date: d, m/d, y/m/d (e.g., 15, 3/15, 26/3/15)
 Keywords: @today, @tom (tomorrow), @mon/@tue/@wed/@thu/@fri/@sat/@sun
+ Korean: @오늘, @내일, @월/@화/@수/@목/@금/@토/@일
 Priority: 1 (highest) to 4 (lowest), default 3
 Done levels: 0 (not started) to 5 (complete)
 "#
