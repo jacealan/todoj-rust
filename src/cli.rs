@@ -61,9 +61,28 @@ pub fn parse_command(input: &str) -> Option<(String, Vec<&str>)> {
     if parts.is_empty() {
         return None;
     }
-    let cmd = parts[0].to_string();
+    let cmd = normalize_cmd(parts[0]);
     let rest: Vec<&str> = parts[1..].to_vec();
     Some((cmd, rest))
+}
+
+/// Normalize command: convert Korean shortcuts to English
+/// Korean: ㅁ=add, ㄱ=edit, ㄷ=remove, ㅇ=done, ㅣ=list, ㅊ=calendar, ㅐ=order, ㄴ=show, ㅗ=help, ㅂ=quit
+fn normalize_cmd(input: &str) -> String {
+    let lower = input.to_lowercase();
+    match lower.as_str() {
+        "ㅁ" => "add".to_string(),
+        "ㄱ" => "edit".to_string(),
+        "ㄷ" => "remove".to_string(),
+        "ㅇ" => "done".to_string(),
+        "ㅣ" => "list".to_string(),
+        "ㅊ" => "calendar".to_string(),
+        "ㅐ" => "order".to_string(),
+        "ㄴ" => "show".to_string(),
+        "ㅗ" => "help".to_string(),
+        "ㅂ" => "quit".to_string(),
+        _ => input.to_string(),
+    }
 }
 
 /// Parse number string into list of indices
