@@ -179,35 +179,97 @@ pub fn format_date(date_str: &str) -> Option<String> {
 /// ```
 pub fn parse_date(input: &str) -> Option<String> {
     let today = Local::now().naive_local().date();
+    
+    // Handle special keywords
+    let lower = input.to_lowercase();
+    if lower == "today" {
+        return Some(today.format("%Y%m%d").to_string());
+    }
+    if lower == "tomorrow" || lower == "tom" {
+        return Some((today + chrono::Duration::days(1)).format("%Y%m%d").to_string());
+    }
+    if lower == "mon" {
+        let days_until_monday = (7 - today.weekday().num_days_from_monday()) % 7;
+        return Some((today + chrono::Duration::days(days_until_monday as i64)).format("%Y%m%d").to_string());
+    }
+    
     let parts: Vec<&str> = input.split(|c| c == '/' || c == '-').collect();
 
     match parts.len() {
-        // Day only: "15" means 15th of current month
+        // Day only: "15" means 15th of current month - use next month if past
         1 => {
             let day: u32 = parts[0].parse().ok()?;
-            let date = NaiveDate::from_ymd_opt(today.year(), today.month(), day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(today.year(), today.month() + 1, day).unwrap());
-            Some(date.format("%Y%m%d").to_string())
+            if day < 1 || day > 31 {
+                return None;
+            }
+            let date = NaiveDate::from_ymd_opt(today.year(), today.month(), day);
+            if date.is_some() {
+                return date.map(|d| d.format("%Y%m%d").to_string());
+            }
+            // Next month if day already passed
+            let next_month = if today.month() == 12 { 
+                (1, today.year() + 1) 
+            } else { 
+                (today.month() + 1, today.year()) 
+            };
+            if day <= days_in_month(next_month.0, next_month.1) {
+                return Some(NaiveDate::from_ymd_opt(next_month.1, next_month.0, day).unwrap().format("%Y%m%d").to_string());
+            }
+            None
         }
-        // Month/Day: "3/15" or "3-15"
+        // Month/Day: "3/15" or "3-15" - use next year if past
         2 => {
             let month: u32 = parts[0].parse().ok()?;
             let day: u32 = parts[1].parse().ok()?;
+            if month < 1 || month > 12 || day < 1 || day > 31 {
+                return None;
+            }
+            if day > days_in_month(month, today.year()) {
+                return None;
+            }
             let year = today.year();
-            let date = NaiveDate::from_ymd_opt(year, month, day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(year + 1, month, day).unwrap());
-            Some(date.format("%Y%m%d").to_string())
+            let date = NaiveDate::from_ymd_opt(year, month, day);
+            if date.is_some() {
+                return date.map(|d| d.format("%Y%m%d").to_string());
+            }
+            // Next year if month/day already passed
+            if day <= days_in_month(month, year + 1) {
+                return Some(NaiveDate::from_ymd_opt(year + 1, month, day).unwrap().format("%Y%m%d").to_string());
+            }
+            None
         }
         // Full: "2026/3/15" or "26/3/15"
         3 => {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
             let day: u32 = parts[2].parse().ok()?;
+            if month < 1 || month > 12 || day < 1 || day > 31 {
+                return None;
+            }
             let full_year = if year < 100 { 2000 + year } else { year };
+            if day > days_in_month(month, full_year) {
+                return None;
+            }
             let date = NaiveDate::from_ymd_opt(full_year, month, day)?;
             Some(date.format("%Y%m%d").to_string())
         }
-        _ => None,
+        _ => None
+    }
+}
+
+/// Get number of days in a month
+fn days_in_month(month: u32, year: i32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30
     }
 }
 

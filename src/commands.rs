@@ -8,6 +8,113 @@ use crate::db::{NewTodo, TodoRepository, UpdateTodo};
 use crate::formatters::parse_date;
 use std::sync::Arc;
 
+/// Parse inline date/priority from end of content
+/// 
+/// Extracts @date and ^priority from the end of content string.
+/// Only parses if these appear at the END and don't interfere with content.
+/// 
+/// # Arguments
+/// * `input` - Raw input string
+/// 
+/// # Returns
+/// * `(content, due_date, priority)` tuple
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// parse_inline("Buy milk @3/15 ^2") -> ("Buy milk", Some("20260315"), Some(2))
+/// parse_inline("check @email") -> ("check @email", None, None)  // @ not at end
+/// ```
+fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
+    let words: Vec<&str> = input.split_whitespace().collect();
+    if words.is_empty() {
+        return (input.to_string(), None, None);
+    }
+    
+    let last = words.last().unwrap_or(&"");
+    let second_last = words.get(words.len().saturating_sub(2));
+    
+    // Check for ^priority at end (1-4 only)
+    let priority = if last.starts_with('^') && last.len() > 1 {
+        let pri = last[1..].parse::<i32>().ok();
+        if let Some(p) = pri {
+            if p >= 1 && p <= 4 { Some(p) } else { None }
+        } else { None }
+    } else {
+        None
+    };
+    
+    // Check for @date at end (if no ^priority) or second to last (if ^priority exists)
+    // Only parse if it looks like a date - contains / or - or all digits
+    let mut due_date: Option<String> = None;
+    let mut has_due_at_end = false;
+    let mut has_due_second_last = false;
+    
+    let looks_like_date = |s: &str| -> bool {
+        let inner = s.strip_prefix('@').unwrap_or(s);
+        inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())
+    };
+    
+    if last.starts_with('@') && last.len() > 1 {
+        let inner = &last[1..];
+        if looks_like_date(last) {
+            if let Some(parsed) = parse_date(inner) {
+                due_date = Some(parsed);
+                has_due_at_end = true;
+            } else {
+                // Date-like pattern but invalid - return content as-is (don't parse)
+                return (input.to_string(), None, None);
+            }
+        }
+    } else if let Some(sl) = second_last {
+        if sl.starts_with('@') && sl.len() > 1 && priority.is_some() {
+            let inner = &sl[1..];
+            if looks_like_date(sl) {
+                if let Some(parsed) = parse_date(inner) {
+                    due_date = Some(parsed);
+                    has_due_second_last = true;
+                } else {
+                    return (input.to_string(), None, None);
+                }
+            }
+        }
+    }
+    
+    // Rebuild content without @date and ^priority
+    let mut new_content = String::new();
+    let mut skip_last = false;
+    let mut skip_second_last = false;
+    
+    if priority.is_some() && last.starts_with('^') {
+        skip_last = true;
+    }
+    if has_due_at_end {
+        skip_last = true;
+    } else if has_due_second_last {
+        skip_second_last = true;
+    }
+    
+    let len = words.len();
+    for (i, word) in words.iter().enumerate() {
+        let should_skip = if i == len - 1 && skip_last {
+            true
+        } else if len >= 2 && i == len - 2 && skip_second_last {
+            true
+        } else {
+            false
+        };
+        
+        if !should_skip {
+            if !new_content.is_empty() {
+                new_content.push(' ');
+            }
+            new_content.push_str(word);
+        }
+    }
+    
+    (new_content, due_date, priority)
+}
+
 /// Add a new todo item
 /// 
 /// Creates a new todo in the database.
@@ -38,23 +145,33 @@ pub fn cmd_add(
     args: &[&str], 
     display_ids: &[i64]
 ) -> Result<bool, String> {
-    let mut content = String::new();
+    let mut raw_content = String::new();
     let mut due_date = None;
     let mut priority = None;
     let mut up_id = None;
     let mut i = 0;
 
-    // Parse arguments
+    // First pass: collect raw content and check for -d, -p, -u flags
     while i < args.len() {
         match args[i] {
-            // Due date: -d 3/15 or --due=3/15
+            // Due date: -d 3/15
             "-d" if i + 1 < args.len() => {
+                if args[i + 1].starts_with('@') {
+                    return Err("날짜는 @ 없이 입력: -d 3/15 또는 @3/15 (예: @today, @3/15, @tom)".to_string());
+                }
                 due_date = parse_date(args[i + 1]);
+                if due_date.is_none() && args[i + 1].chars().any(|c| c.is_ascii_digit()) {
+                    return Err(format!("잘못된 날짜입니다: {} - calendar 명령어로 확인하세요.", args[i + 1]));
+                }
                 i += 2;
             }
             // Priority: -p 1-4 (default 3)
             "-p" if i + 1 < args.len() => {
-                priority = args[i + 1].parse().ok();
+                let p = args[i + 1].parse::<i32>().ok();
+                if p.is_none() || p.unwrap() < 1 || p.unwrap() > 4 {
+                    return Err("잘못된 우선순위입니다. 1-4 숫자를 입력: -p 1~4 또는 ^1~4".to_string());
+                }
+                priority = p;
                 i += 2;
             }
             // Parent todo: -u 5 (creates sub-task under todo #5)
@@ -63,19 +180,60 @@ pub fn cmd_add(
                     if num > 0 && num <= display_ids.len() {
                         up_id = Some(display_ids[num - 1]);
                     }
+                } else {
+                    return Err("잘못된 리스트 번호입니다. 리스트 번호를 입력해주세요.".to_string());
                 }
                 i += 2;
             }
             // Content (everything else)
             _ => {
-                if !content.is_empty() {
-                    content.push(' ');
+                if !raw_content.is_empty() {
+                    raw_content.push(' ');
                 }
-                content.push_str(args[i]);
+                raw_content.push_str(args[i]);
                 i += 1;
             }
         }
     }
+
+    // Parse inline @date and ^priority from content end (only if -d/-p NOT provided)
+    let use_inline = due_date.is_none() && priority.is_none();
+    let (content, inline_due, inline_pri) = if use_inline {
+        parse_inline(&raw_content)
+    } else {
+        // Keep @ and ^ as content if -d/-p provided
+        (raw_content.clone(), None, None)
+    };
+    
+    // Validate: only check invalid patterns when using inline
+    if use_inline && !raw_content.is_empty() {
+        let words: Vec<&str> = raw_content.split_whitespace().collect();
+        if let Some(last) = words.last() {
+            if last.starts_with('@') && last.len() > 1 {
+                let inner = last.strip_prefix('@').unwrap_or("");
+                if (inner.chars().all(|c| c.is_ascii_digit()) || inner.contains('/') || inner.contains('-')) && inline_due.is_none() {
+                    let suggestion = if inner.contains('/') { 
+                        "월/일 형식으로 입력: @월/일 (예: @3/15, @12/31)".to_string() 
+                    } else if inner.contains('-') {
+                        "년-월-일 형식으로 입력: @년-월-일 (예: @26-3-15)".to_string()
+                    } else {
+                        format!("{}월의 날짜가 없습니다. calendar 명령어로 확인하세요.", inner)
+                    };
+                    return Err(format!("잘못된 날짜입니다: @{} - {}", inner, suggestion));
+                }
+            }
+            if last.starts_with('^') && last.len() > 1 {
+                let p_str = &last[1..];
+                if p_str.parse::<i32>().is_err() || p_str.parse::<i32>().map(|p| p < 1 || p > 4).unwrap_or(true) {
+                    return Err("잘못된 우선순위입니다. ^1, ^2, ^3, ^4 중 하나를 입력해주세요.".to_string());
+                }
+            }
+        }
+    }
+    
+    // Use -d/-p if provided, otherwise inline values
+    let final_due = due_date.or(inline_due);
+    let final_pri = priority.or(inline_pri);
 
     // Validate content
     if content.is_empty() {
@@ -85,8 +243,8 @@ pub fn cmd_add(
     // Create in database
     repo.create(NewTodo {
         todo: content,
-        due_date,
-        priority,
+        due_date: final_due,
+        priority: final_pri,
         up_id,
     })?;
     println!("추가되었습니다.");
@@ -134,7 +292,8 @@ pub fn cmd_edit(
             valid_ids.push(display_ids[n - 1]);
         }
 
-        // Parse update options
+        // Parse update options (including inline @date and ^priority)
+        let mut raw_new_content: Option<String> = None;
         let mut due_date = None;
         let mut priority = None;
         let mut i = 1;
@@ -149,9 +308,52 @@ pub fn cmd_edit(
                     i += 2;
                 }
                 _ => {
+                    // Collect for inline parsing
+                    if raw_new_content.is_none() {
+                        raw_new_content = Some(args[i].to_string());
+                    } else {
+                        raw_new_content = Some(format!("{} {}", raw_new_content.unwrap(), args[i]));
+                    }
                     i += 1;
                 }
             }
+        }
+
+        // Parse inline @date and ^priority
+        if let Some(ref raw) = raw_new_content {
+            let (content, inline_due, inline_pri) = parse_inline(raw);
+            if !content.is_empty() {
+                // If content changed, use it (but this is batch mode, typically content stays same)
+            }
+            
+            // Validate inline date
+            if inline_due.is_none() && due_date.is_none() {
+                let words: Vec<&str> = raw.split_whitespace().collect();
+                if let Some(last) = words.last() {
+                    if last.starts_with('@') && last.len() > 1 {
+                        let inner = last.strip_prefix('@').unwrap_or("");
+                        if inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit()) {
+                            return Err(format!("잘못된 날짜입니다: @{} - calendar 명령어로 확인하세요.", inner));
+                        }
+                    }
+                }
+            }
+            
+            // Validate inline priority
+            if inline_pri.is_none() && priority.is_none() {
+                let words: Vec<&str> = raw.split_whitespace().collect();
+                if let Some(last) = words.last() {
+                    if last.starts_with('^') && last.len() > 1 {
+                        let p_str = &last[1..];
+                        if p_str.parse::<i32>().is_err() || p_str.parse::<i32>().map(|p| p < 1 || p > 4).unwrap_or(true) {
+                            return Err("잘못된 우선순위입니다. ^1, ^2, ^3, ^4 중 하나를 입력해주세요.".to_string());
+                        }
+                    }
+                }
+            }
+            
+            due_date = due_date.or(inline_due);
+            priority = priority.or(inline_pri);
         }
 
         // Apply updates
@@ -180,8 +382,9 @@ pub fn cmd_edit(
             return Err("유효한 리스트 번호를 입력해주세요.".to_string());
         }
         
-        // Prompt for new content
-        println!("사용법: edit {} <새 내용> [-d 날짜] [-p 우선순위] [-u 리스트번호>", num);
+        // Prompt for new content (supports inline @date ^priority)
+        println!("사용법: edit {} <새 내용> [-d 날짜] [-p 우선순위] [-u 리스트번호]", num);
+        println!("     또는: edit {} <새 내용@날짜 ^우선순위>", num);
         print!("수정: ");
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
         
@@ -189,12 +392,14 @@ pub fn cmd_edit(
         if std::io::stdin().read_line(&mut input).is_ok() {
             let new_input = input.trim();
             if !new_input.is_empty() {
+                // Parse inline @date and ^priority
+                let (content, due_date, priority) = parse_inline(new_input);
                 repo.update(
                     display_ids[num - 1],
                     UpdateTodo {
-                        todo: Some(new_input.to_string()),
-                        due_date: None,
-                        priority: None,
+                        todo: if content.is_empty() { None } else { Some(content) },
+                        due_date,
+                        priority,
                         up_id: None,
                     },
                 )?;

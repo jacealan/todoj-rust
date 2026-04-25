@@ -95,7 +95,7 @@ fn format_todo(
     } else {
         None
     };
-    let parent_str = parent_ref.map(|p| format!("{}> ", p)).unwrap_or_default();
+    let parent_str = parent_ref.map(|p| format!("\x1b[38;2;156;163;175m{}> \x1b[0m", p)).unwrap_or_default();
 
 // Format due date with color (@date - both @ and date colored)
     let due_str = if let Some(ref d) = item.due_date {
