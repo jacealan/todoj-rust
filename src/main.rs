@@ -495,7 +495,7 @@ fn main() {
                 display_ids = ids;
                 _all_todos = todos;
             }
-            "show" | "p" | "ㅔ" => {
+            "past" | "p" | "ㅔ" => {
                 show_done = !show_done;
                 let (todos, ids) = redraw(&repo, show_done, use_order);
                 display_ids = ids;

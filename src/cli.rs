@@ -67,7 +67,7 @@ pub fn parse_command(input: &str) -> Option<(String, Vec<&str>)> {
 }
 
 /// Normalize command: convert Korean shortcuts to English
-/// a=ㅁ, e=ㄷ, r=ㄱ, d=ㅇ, l=ㅣ, c=ㅊ, o=ㅐ, s=search, p=ㅔ, h=ㅗ, q=ㅂ
+/// a=ㅁ, e=ㄷ, r=ㄱ, d=ㅇ, l=ㅣ, c=ㅊ, o=ㅐ, s=search, p=past, h=ㅗ, q=ㅂ
 fn normalize_cmd(input: &str) -> String {
     let lower = input.to_lowercase();
     match lower.as_str() {
@@ -79,8 +79,8 @@ fn normalize_cmd(input: &str) -> String {
         "ㅊ" => "calendar".to_string(),
         "ㅐ" => "order".to_string(),
         "ㄴ" => "search".to_string(),
-        "ㅔ" => "show".to_string(),
-        "p" => "show".to_string(),
+        "ㅔ" => "past".to_string(),
+        "p" => "past".to_string(),
         "ㅗ" => "help".to_string(),
         "ㅂ" => "quit".to_string(),
         "search" => "search".to_string(),

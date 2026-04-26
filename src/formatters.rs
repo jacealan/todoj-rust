@@ -406,13 +406,16 @@ Commands:
       n/p  : n per page, page p
       n-m  : show n to m
 
+  search <keyword>                                Search todos
+      s ㄴ search word
+
   calendar (c) [m] [y]                         Show calendar
       no args: show 4 weeks from today
       m     : show month (e.g., 4)
       y/m   : show year/month (e.g., 25/3)
 
   order (o)                                     Toggle parent-child order
-  show (s)                                      Toggle show completed
+  past (p)                                     Toggle show completed
   help (h)                                      Show this help
   quit (q)                                      Quit
 
@@ -421,6 +424,7 @@ Keywords: @today, @tom (tomorrow), @mon/@tue/@wed/@thu/@fri/@sat/@sun
  Korean: @오늘, @내일, @월/@화/@수/@목/@금/@토/@일
 Priority: 1 (highest) to 4 (lowest), default 3
 Done levels: 0 (not started) to 5 (complete)
+Shortcuts: a=ㅁ e=ㄷ r=ㄱ d=ㅇ l=ㅣ c=ㅊ o=ㅐ s=ㄴ p=ㅔ h=ㅗ q=ㅂ
 "#
     );
 }

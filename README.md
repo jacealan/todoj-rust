@@ -12,6 +12,7 @@ A simple yet powerful terminal-based TODO manager written in Rust.
 - **Calendar View**: 4 weeks or specific month display
 - **Flexible Display**: Order by due date, priority, or creation time
 - **Completed Filtering**: Show/hide completed todos
+- **Search**: Search todos by keyword, includes completed
 - **Local SQLite Storage**: Zero-configuration local storage
 - **Cross-device Sync**: PostgreSQL support planned (future)
 - **Color Display**: Priority and due dates shown with colors
@@ -218,13 +219,42 @@ Shows sub-todos under their parent todos:
 2 [ ] Another       ^2
 ```
 
-### show (s) - Toggle showing completed
+### search (s) - Search todos
+
+Search for todos containing keyword:
+```bash
+search test              # Search for "test"
+s test                 # Same, using shortcut
+ㄴ test                # Same, using Korean shortcut
+```
+
+Shows all matching todos including completed. Results displayed 10 at a time:
+- Press Enter to show next 10
+- Press q to end search
+
+### past (p) - Toggle showing completed
 
 Shows completed (done=5) todos at the bottom.
 
 ### help (h) - Show help
 
 ### quit (q) - Exit application
+
+## Shortcuts
+
+| Shortcut | Command |
+|----------|----------|
+| ㅁ | add |
+| ㄷ | edit |
+| ㄱ | remove |
+| ㅇ | done |
+| ㅣ | list |
+| ㅊ | calendar |
+| ㅐ | order |
+| ㄴ | search |
+| p | past |
+| ㅗ | help |
+| ㅂ | quit |
 
 ## Date Formats
 
