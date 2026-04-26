@@ -5,16 +5,17 @@ A simple yet powerful terminal-based TODO manager written in Rust.
 ## Features
 
 - **CRUD Operations**: Add, edit, remove, and complete todos
+- **Clone Todos**: Clone existing todos with `more` command
 - **Due Date Tracking**: Flexible input formats (3/15, 2026/3/15, @today, @tom, etc.)
 - **Priority Levels**: 1 (highest) to 4 (lowest), default 3
 - **Sub-todos**: Parent-child relationships with `-u` flag or inline format
 - **Progress Tracking**: 0%, 20%, 40%, 60%, 80%, 100%
 - **Calendar View**: 4 weeks or specific month display
-- **Flexible Display**: Order by due date, priority, or creation time
+- **Order Mode**: Parent-child hierarchy display
 - **Completed Filtering**: Show/hide completed todos
 - **Search**: Search todos by keyword, includes completed
+- **Multiple Databases**: Use different DB files for work/personal
 - **Local SQLite Storage**: Zero-configuration local storage
-- **Cross-device Sync**: PostgreSQL support planned (future)
 - **Color Display**: Priority and due dates shown with colors
 
 ## Installation
@@ -219,6 +220,12 @@ Shows sub-todos under their parent todos:
 2 [ ] Another       ^2
 ```
 
+Deleted parent shows as `x>` (gray):
+```
+1 [x] Completed    ^3
+   [ ] Sub-task   ^3     # parent is deleted
+```
+
 ### search (s) - Search todos
 
 Search for todos containing keyword:
@@ -232,6 +239,26 @@ Shows all matching todos including completed. Results displayed 10 at a time:
 - Press Enter to show next 10
 - Press q to end search
 
+### more (m) - Clone todo
+
+Clone existing todo(s) with same content, priority, parent:
+```bash
+# Clone single todo
+more 1
+
+# Clone multiple
+more 1,3,5
+more 1-5
+
+# With date/priority override
+more 1 -d 3/15 -p 2
+more 1 @3/15 ^2      # Inline format
+
+# Change parent when cloning
+more 1 -u 3         # Make sub-task of todo #3
+more 1 -u 0         # Make top-level (remove parent)
+```
+
 ### past (p) - Toggle showing completed
 
 Shows completed (done=5) todos at the bottom.
@@ -242,19 +269,20 @@ Shows completed (done=5) todos at the bottom.
 
 ## Shortcuts
 
-| Shortcut | Command |
-|----------|----------|
-| ㅁ | add |
-| ㄷ | edit |
-| ㄱ | remove |
-| ㅇ | done |
-| ㅣ | list |
-| ㅊ | calendar |
-| ㅐ | order |
-| ㄴ | search |
-| p | past |
-| ㅗ | help |
-| ㅂ | quit |
+| Shortcut | Command | English |
+|----------|---------|---------|
+| ㅁ | add | a |
+| ㄷ | edit | e |
+| ㄱ | remove | r |
+| ㅇ | done | d |
+| ㅣ | list | l |
+| ㅊ | calendar | c |
+| ㅐ | order | o |
+| ㄴ | search | s |
+| p | past | p |
+| ㅗ | help | h |
+| ㅂ | quit | q |
+| m,ㅡ | more | - |
 
 ## Date Formats
 
@@ -262,24 +290,37 @@ Due date supports flexible input:
 
 | Format | Example | Output |
 |--------|--------|--------|
-| Day | 15 | 2026-03-15 (this month) |
+| Day only | 15 | Nearest future date with day 15 |
 | Month/Day | 3/15 or 3-15 | 2026-03-15 (this year) |
 | Year/Month/Day | 26/3/15 | 2026-03-15 |
 | Full | 2026/3/15 | 2026-03-15 |
 | Keywords | @today, @tom, @mon | Today, Tomorrow, Next Monday |
 | Korean | @오늘, @내일, @월 | Today, Tomorrow, Next Monday |
 
+**Day only behavior:**
+- `add Task @15` when today is 4/26 → sets to 5/1 (nearest future 15th)
+- Finds the closest future date with that day number
+
+**Invalid date handling:**
+- `@0` → "Invalid date"
+- `@33` → "33일은 없습니다. 1~31 사이 날짜"
+
 ## Database
 
-### Location
+### Default Location
 
-Default: `~/.todoj.db`
+`~/.todoj.db`
 
 ### Custom Database
 
 ```bash
-todoj --db /path/to/custom.db
+# Use different database file
+todoj ~/icloud/todo.db     # Cloud sync from iCloud Drive
+todoj ./work.db          # Work todos
+todoj ~/personal.db    # Personal todos
 ```
+
+You can have multiple databases for different purposes (work, personal, etc.).
 
 ### Schema
 
@@ -334,9 +375,10 @@ CREATE TABLE todos (
 
 ## Roadmap
 
+- [x] Clone todos (`more` command)
+- [x] Multiple databases
 - [ ] PostgreSQL support for cross-device sync
 - [ ] Web interface
-- [ ] Mobile app
 - [ ] Tags/categories
 - [ ] Recurring todos
 

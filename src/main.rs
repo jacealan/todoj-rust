@@ -397,7 +397,7 @@ fn main() {
     let cli_args = Args::parse();
 
     // Create repository (SQLite for now)
-    let repo: Arc<dyn TodoRepository> = if let Some(db_path) = cli_args.db {
+    let repo: Arc<dyn TodoRepository> = if let Some(db_path) = &cli_args.db {
         Arc::new(SqliteRepo::new(PathBuf::from(db_path)))
     } else {
         // Check for PostgreSQL connection string (future use)

@@ -328,6 +328,9 @@ Commands:
   search <keyword>                                Search todos
       s ㄴ search word
 
+  more <list#>[,...] [-d date] [-p priority] [-u N] Clone TODO
+      m ㅡ 1,2-5 [-d date] [-p priority] [-u N]  Clone with overrides
+
   calendar (c) [m] [y]                         Show calendar
       no args: show 4 weeks from today
       m     : show month (e.g., 4)

@@ -25,10 +25,13 @@ pub struct Args {
     #[arg(short, long)]
     pub list_mode: bool,
     
-    /// Custom database path
+    /// Custom database path (positional argument)
     /// 
-    /// Path to SQLite database file. If not specified, uses default location ~/.todoj.db
-    #[arg(long)]
+    /// Examples:
+    ///   todoj ~/icloud/todo.db
+    ///   todoj ./my-todos.db
+    ///   todoj                    # uses default ~/.todoj.db
+    #[arg()]
     pub db: Option<String>,
 }
 
