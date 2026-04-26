@@ -51,6 +51,58 @@ fn get_default_db_path() -> PathBuf {
     home.join(".todoj.db")
 }
 
+/// Build parent chain (e.g., "1>2>" for multi-level parent)
+fn build_parent_chain(parent_id: i64, display_ids: &[i64], all_todos: &[Todo]) -> String {
+    let parent_color = "\x1b[38;2;156;163;175m";
+    let reset = "\x1b[0m";
+    let all_ids: std::collections::HashSet<i64> = all_todos.iter().map(|t| t.id).collect();
+    
+    // Collect parent IDs from root to immediate (1->2->3)
+    let mut parent_ids: Vec<i64> = Vec::new();
+    let mut current_id = Some(parent_id);
+    
+    while let Some(id) = current_id {
+        if let Some(p) = all_todos.iter().find(|t| t.id == id) {
+            parent_ids.push(p.id);
+            current_id = p.up_id;
+        } else if all_ids.contains(&id) {
+            // Found but deleted - mark as x>
+            parent_ids.push(id);
+            break;
+        } else {
+            // Not found - mark as x> and stop
+            parent_ids.push(id);
+            break;
+        }
+    }
+    
+    // Reverse: from root to immediate parent
+    parent_ids.reverse();
+    
+    // Build chain string (1>2> instead of 2>1>)
+    let mut chain = String::new();
+    let display_id_set: std::collections::HashSet<i64> = display_ids.iter().cloned().collect();
+    
+    for id in &parent_ids {
+        if display_id_set.contains(id) {
+            // Parent is visible in display - show list number
+            if let Some(pos) = display_ids.iter().position(|&x| x == *id) {
+                chain.push_str(&format!("{}{}>", parent_color, pos + 1));
+            }
+        } else {
+            // Parent not visible - show x>
+            chain.push_str(&format!("{}x>", parent_color));
+        }
+    }
+    
+    if chain.is_empty() {
+        String::new()
+    } else {
+        chain.push_str(reset);
+        chain
+    }
+}
+
 /// Format todo for display
 /// 
 /// Creates display string with:
@@ -78,6 +130,7 @@ fn format_todo(
     is_done: bool,
     display_ids: &[i64],
     use_order: bool,
+    all_todos: &[Todo],
 ) -> String {
     let num_str = format!("{}", num);
     let padded_num = format!("{:>width$}", num_str);
@@ -90,20 +143,14 @@ fn format_todo(
     };
     let check = if is_done { "[x]" } else { "[ ]" };
 
-    // Find parent in display list
+    // Build parent chain (e.g., "1>2>" for multi-level parent)
     let parent_str = if let Some(parent_id) = item.up_id {
-        if let Some(pos) = display_ids.iter().position(|&x| x == parent_id) {
-            // Parent is visible - show its list number
-            format!("\x1b[38;2;156;163;175m{}> \x1b[0m", pos + 1)
-        } else {
-            // Parent not visible (deleted or filtered) - show x>
-            "\x1b[38;2;156;163;175mx> \x1b[0m".to_string()
-        }
+        build_parent_chain(parent_id, display_ids, all_todos)
     } else {
         String::new()
     };
 
-// Format due date with color (@date - both @ and date colored)
+    // Format due date with color (@date - both @ and date colored)
     let due_str = if let Some(ref d) = item.due_date {
         let color = formatters::color_for_due_date(d);
         let date = formatters::format_date(d).unwrap_or_default();
@@ -141,12 +188,21 @@ fn format_todo(
         String::new()
     };
 
-format!(
-        "{}{} {} {}{}{}{}{}{}\n",
-        padded_num, indent, check, parent_str,
-        item.todo, due_str, priority_str, progress, done_str
-    )
+    let formatted_str = if parent_str != "" {
+        format!(
+            "{}{} {} {} {}{}{}{}{}\n",
+            padded_num, indent, check, parent_str,
+            item.todo, due_str, priority_str, progress, done_str
+        )
+    } else {
+        format!(
+            "{}{} {} {}{}{}{}{}{}\n",
+            padded_num, indent, check, parent_str,
+            item.todo, due_str, priority_str, progress, done_str
+        )
+    };
 
+    formatted_str
 }
 
 /// List todos with various display options
@@ -180,6 +236,8 @@ fn list_todos(
 ) -> Result<(Vec<Todo>, Vec<i64>), String> {
     // Fetch all todos
     let todos = repo.find_all(show_done)?;
+    // Fetch all todos including deleted for parent lookup
+    let all_todos = repo.find_all_including_deleted()?;
 
     // Split into incomplete and completed
     let incomplete: Vec<_> = todos.iter().filter(|t| t.done != 5).cloned().collect();
@@ -346,6 +404,7 @@ fn list_todos(
                 false,
                 &display_ids,
                 use_order,
+                &all_todos,
             ));
         }
     }
@@ -368,6 +427,7 @@ fn list_todos(
                 true,
                 &display_ids,
                 use_order,
+                &all_todos,
             ));
         }
     }

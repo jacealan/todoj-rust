@@ -117,6 +117,9 @@ pub trait TodoRepository: Send + Sync {
     /// * `Err(message)` on error
     fn find_all(&self, include_done: bool) -> Result<Vec<Todo>, String>;
     
+    /// Find all todos including deleted (for parent lookup)
+    fn find_all_including_deleted(&self) -> Result<Vec<Todo>, String>;
+    
     /// Update existing todo
     /// 
     /// # Arguments

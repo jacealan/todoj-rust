@@ -226,6 +226,35 @@ impl TodoRepository for SqliteRepo {
                 .ok_or_else(|| "Todo not found".to_string())
         })
     }
+    
+    /// Find all todos including deleted (for parent lookup)
+    fn find_all_including_deleted(&self) -> Result<Vec<Todo>, String> {
+        Self::with_conn(self, |conn| {
+            let sql = "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+                      FROM todos ORDER BY id";
+            let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| {
+                Ok(Todo {
+                    id: row.get(0)?,
+                    todo: row.get(1)?,
+                    due_date: row.get(2)?,
+                    priority: row.get(3)?,
+                    up_id: row.get(4)?,
+                    done: row.get(5)?,
+                    done_at: row.get(6)?,
+                    deleted_at: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            }).map_err(|e| e.to_string())?;
+
+            let mut todos = Vec::new();
+            for row in rows {
+                todos.push(row.map_err(|e| e.to_string())?);
+            }
+            Ok(todos)
+        })
+    }
 
     /// Search todos by keyword (includes completed)
     fn search(&self, keyword: &str) -> Result<Vec<Todo>, String> {
