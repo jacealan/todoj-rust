@@ -271,8 +271,14 @@ fn list_todos(
 
     // Sort incomplete (respecting order mode)
     let display_incomplete: Vec<_> = if use_order {
-        // Parent IDs of completed todos
-        let completed_ids: std::collections::HashSet<i64> = completed.iter().map(|t| t.id).collect();
+        // IDs in incomplete list
+        let incomplete_ids: std::collections::HashSet<i64> = incomplete.iter().map(|t| t.id).collect();
+        
+        // Deleted IDs from all_todos
+        let deleted_ids: std::collections::HashSet<i64> = all_todos.iter()
+            .filter(|t| t.deleted_at.is_some())
+            .map(|t| t.id)
+            .collect();
         
         // Recursive function to add item and all its descendants
         fn add_with_descendants<'a>(
@@ -291,13 +297,16 @@ fn list_todos(
             }
         }
         
-        // Start with top-level items (no parent, or parent is completed)
+        // Top-level: no parent OR parent is completed OR parent is deleted or not in incomplete
         let top_level: Vec<_> = incomplete.iter()
             .filter(|t| {
                 if t.up_id.is_none() {
-                    true
+                    true // No parent
                 } else if let Some(pid) = t.up_id {
-                    completed_ids.contains(&pid)
+                    // Check if parent chain is broken
+                    let parent_in_incomplete = incomplete_ids.contains(&pid);
+                    let parent_deleted = deleted_ids.contains(&pid);
+                    parent_in_incomplete == false || parent_deleted
                 } else {
                     false
                 }
@@ -328,13 +337,11 @@ fn list_todos(
             add_with_descendants(item, &incomplete, &mut ordered);
         }
         
-        // Add standalone items (parent deleted and not in list) at the end
-        // Sort by id descending so parent comes before child
-        let mut standalone: Vec<_> = incomplete.iter()
-            .filter(|t| t.up_id.is_some() && !ordered.iter().any(|x| x.id == *t.up_id.as_ref().unwrap_or(&0)))
+        // Add remaining items (shouldn't happen but just in case)
+        let remaining: Vec<_> = incomplete.iter()
+            .filter(|t| !ordered.iter().any(|x| x.id == t.id))
             .collect();
-        standalone.sort_by(|a, b| b.id.cmp(&a.id)); // Descending: parent first
-        for item in standalone {
+        for item in remaining {
             add_with_descendants(item, &incomplete, &mut ordered);
         }
         
