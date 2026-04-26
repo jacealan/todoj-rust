@@ -183,14 +183,19 @@ pub fn cmd_add(
                 priority = p;
                 i += 2;
             }
-            // Parent todo: -u 5 (creates sub-task under todo #5)
+            // Parent todo: -u 5 (creates sub-task under todo #5), -u 0 (removes parent)
             "-u" if i + 1 < args.len() => {
                 if let Ok(num) = args[i + 1].parse::<usize>() {
-                    if num > 0 && num <= display_ids.len() {
+                    if num == 0 {
+                        // -u 0: remove parent (make it a top-level todo)
+                        up_id = None;
+                    } else if num > 0 && num <= display_ids.len() {
                         up_id = Some(display_ids[num - 1]);
+                    } else {
+                        return Err("잘못된 리스트 번호입니다.".to_string());
                     }
                 } else {
-                    return Err("잘못된 리스트 번호입니다. 리스트 번호를 입력해주세요.".to_string());
+                    return Err("잘못된 리스트 번호입니다.".to_string());
                 }
                 i += 2;
             }
@@ -319,7 +324,9 @@ pub fn cmd_edit(
                 }
                 "-u" if i + 1 < args.len() => {
                     if let Ok(num) = args[i + 1].parse::<usize>() {
-                        if num > 0 && num <= display_ids.len() {
+                        if num == 0 {
+                            up_id = None;
+                        } else if num > 0 && num <= display_ids.len() {
                             up_id = Some(display_ids[num - 1]);
                         }
                     }
@@ -652,7 +659,6 @@ pub fn cmd_search(repo: &Arc<dyn TodoRepository>, keyword: &str) -> Result<bool,
     
     while current_end < total {
         println!("\n... more:Enter, end search:q");
-        print!(">");
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
         
         let mut input = String::new();

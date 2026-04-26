@@ -91,12 +91,17 @@ fn format_todo(
     let check = if is_done { "[x]" } else { "[ ]" };
 
     // Find parent in display list
-    let parent_ref = if let Some(parent_id) = item.up_id {
-        display_ids.iter().position(|&x| x == parent_id).map(|p| p + 1)
+    let parent_str = if let Some(parent_id) = item.up_id {
+        if let Some(pos) = display_ids.iter().position(|&x| x == parent_id) {
+            // Parent is visible - show its list number
+            format!("\x1b[38;2;156;163;175m{}> \x1b[0m", pos + 1)
+        } else {
+            // Parent not visible (deleted or filtered) - show x>
+            "\x1b[38;2;156;163;175mx> \x1b[0m".to_string()
+        }
     } else {
-        None
+        String::new()
     };
-    let parent_str = parent_ref.map(|p| format!("\x1b[38;2;156;163;175m{}> \x1b[0m", p)).unwrap_or_default();
 
 // Format due date with color (@date - both @ and date colored)
     let due_str = if let Some(ref d) = item.due_date {
@@ -211,22 +216,43 @@ fn list_todos(
         // Parent IDs of completed todos
         let completed_ids: std::collections::HashSet<i64> = completed.iter().map(|t| t.id).collect();
         
-        // Parents: incomplete todos without parent (or parent is completed)
-        let mut parents: Vec<_> = incomplete.iter().filter(|t| {
-            t.up_id.is_none() || t.up_id.map(|id| completed_ids.contains(&id)).unwrap_or(false)
-        }).cloned().collect();
+        // Recursive function to add item and all its descendants
+        fn add_with_descendants<'a>(
+            item: &'a Todo,
+            incomplete: &'a[Todo],
+            ordered: &mut Vec<&'a Todo>
+        ) {
+            if !ordered.iter().any(|x| x.id == item.id) {
+                ordered.push(item);
+            }
+            // Add all children of this item
+            for child in incomplete {
+                if child.up_id == Some(item.id) {
+                    add_with_descendants(child, incomplete, ordered);
+                }
+            }
+        }
         
-        // Children: incomplete todos whose parent is in the parents list
-        let children: Vec<_> = incomplete.iter().filter(|t| {
-            t.up_id.map(|id| parents.iter().any(|p| p.id == id)).unwrap_or(false)
-        }).cloned().collect();
-
-        // Sort parents by due date, priority, created
-        parents.sort_by(|a, b| {
+        // Start with top-level items (no parent, or parent is completed)
+        let top_level: Vec<_> = incomplete.iter()
+            .filter(|t| {
+                if t.up_id.is_none() {
+                    true
+                } else if let Some(pid) = t.up_id {
+                    completed_ids.contains(&pid)
+                } else {
+                    false
+                }
+            })
+            .collect();
+        
+        // Sort top-level by due date, priority, created
+        let mut sorted_toplevel: Vec<_> = top_level.iter().collect();
+        sorted_toplevel.sort_by(|a, b| {
             let a_has_due = a.due_date.is_some();
             let b_has_due = b.due_date.is_some();
             if a_has_due != b_has_due {
-                b_has_due.cmp(&a_has_due)  // Due dates first, then nulls
+                b_has_due.cmp(&a_has_due)
             } else {
                 a.due_date
                     .as_ref()
@@ -237,18 +263,24 @@ fn list_todos(
                     .then(b.id.cmp(&a.id))
             }
         });
-
-        // Build ordered list: parents first, then their children
-        let mut ordered: Vec<Todo> = Vec::new();
-        for parent in &parents {
-            ordered.push((*parent).clone());
-            for child in &children {
-                if child.up_id == Some(parent.id) {
-                    ordered.push((*child).clone());
-                }
-            }
+        
+        // Build ordered list recursively
+        let mut ordered: Vec<&Todo> = Vec::new();
+        for item in sorted_toplevel {
+            add_with_descendants(item, &incomplete, &mut ordered);
         }
-        ordered
+        
+        // Add standalone items (parent deleted and not in list) at the end
+        // Sort by id descending so parent comes before child
+        let mut standalone: Vec<_> = incomplete.iter()
+            .filter(|t| t.up_id.is_some() && !ordered.iter().any(|x| x.id == *t.up_id.as_ref().unwrap_or(&0)))
+            .collect();
+        standalone.sort_by(|a, b| b.id.cmp(&a.id)); // Descending: parent first
+        for item in standalone {
+            add_with_descendants(item, &incomplete, &mut ordered);
+        }
+        
+        ordered.into_iter().cloned().collect()
     } else {
         incomplete
     };
