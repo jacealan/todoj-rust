@@ -152,4 +152,7 @@ pub trait TodoRepository: Send + Sync {
     /// * `Ok(todo)` - Updated todo
     /// * `Err(message)` on error
     fn set_done(&self, id: i64, done_level: Option<i32>) -> Result<Todo, String>;
+
+    /// Search todos by keyword (case-insensitive, includes completed)
+    fn search(&self, keyword: &str) -> Result<Vec<Todo>, String>;
 }
