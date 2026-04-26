@@ -5,7 +5,7 @@
 
 use crate::cli;
 use crate::db::{NewTodo, TodoRepository, UpdateTodo};
-use crate::formatters::parse_date;
+use crate::formatters::{parse_date, highlight_keyword, format_date};
 use std::sync::Arc;
 
 /// Parse inline date/priority from end of content
@@ -36,10 +36,7 @@ fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
     
     // Check for ^priority at end (1-4 only)
     let priority = if last.starts_with('^') && last.len() > 1 {
-        let pri = last[1..].parse::<i32>().ok();
-        if let Some(p) = pri {
-            if p >= 1 && p <= 4 { Some(p) } else { None }
-        } else { None }
+        last[1..].parse::<i32>().ok().filter(|&p| (1..=4).contains(&p))
     } else {
         None
     };
@@ -577,5 +574,102 @@ pub fn cmd_done(
         repo.set_done(id, level)?;
     }
     println!("완료 상태가 변경되었습니다.");
+    Ok(true)
+}
+
+/// Search todos by keyword with pagination
+/// 
+/// Searches both content and due_date fields.
+/// Shows 10 results per page with Enter for next page, q to quit.
+/// 
+/// # Arguments
+/// * `repo` - Database repository
+/// * `keyword` - Search keyword
+/// 
+/// # Returns
+/// * `Ok(true)` on success (even if no results)
+/// * `Err(message)` on error
+pub fn cmd_search(repo: &Arc<dyn TodoRepository>, keyword: &str) -> Result<bool, String> {
+    let todos = repo.search(keyword)?;
+    
+    if todos.is_empty() {
+        println!("'{}'(이)란 단어를 포함한 할일이 없습니다.", keyword);
+        return Ok(true);
+    }
+    
+    let total = todos.len();
+    let width = total.to_string().len();
+    
+    let parent_ref_color = "\x1b[38;2;156;163;175m";
+    let reset = "\x1b[0m";
+    
+    let display_page = |start: usize, end: usize| {
+        for seq in start..end {
+            if let Some(todo) = todos.get(seq) {
+                let is_complete = todo.done == 5;
+                let parent_ref = todo.up_id.and_then(|pid| {
+                    todos.iter().position(|t| t.id == pid).map(|i| i + 1)
+                });
+                let parent_str = parent_ref.map(|p| format!("{}{}> {}{}", parent_ref_color, p, reset, reset)).unwrap_or_default();
+                
+                let due_str = todo.due_date.as_ref()
+                    .and_then(|d| format_date(d))
+                    .map(|d| format!(" @{}", d))
+                    .unwrap_or_default();
+                
+                let done = todo.done;
+                
+                let progress_str = if done > 0 && !is_complete {
+                    format!(" {}%", done * 20)
+                } else if is_complete {
+                    todo.done_at.as_ref()
+                        .and_then(|d| crate::formatters::format_date(d))
+                        .map(|d| format!(" %{}{}", d, reset))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                
+                let highlighted = highlight_keyword(&todo.todo, keyword);
+                println!("{:>width$} [{}] {}{}{} ^{}{}", 
+                    seq + 1,
+                    if is_complete { "x" } else { " " },
+                    parent_str,
+                    highlighted,
+                    due_str,
+                    todo.priority,
+                    progress_str,
+                    width = width
+                );
+            }
+        }
+    };
+    
+    println!("=== 검색 결과: {}개 ===", total);
+    display_page(0, 10.min(total));
+    
+    let mut current_end = 10.min(total);
+    
+    while current_end < total {
+        println!("\n... more:Enter, end search:q");
+        print!(">");
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_err() {
+            break;
+        }
+        let input = input.trim();
+        
+        if input.is_empty() {
+            let start = current_end;
+            let end = (start + 10).min(total);
+            display_page(start, end);
+            current_end = end;
+        } else if input == "q" || input == "ㅂ" {
+            break;
+        }
+    }
+    
     Ok(true)
 }

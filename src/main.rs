@@ -36,6 +36,7 @@ mod formatters;
 
 use clap::Parser;
 use cli::{parse_command, parse_list_range, Args};
+use commands::cmd_search;
 use db::{SqliteRepo, Todo, TodoRepository};
 use formatters::{clear_screen, print_help, show_calendar, show_calendar_weeks, parse_calendar_args, now_prompt};
 use std::io::Write;
@@ -70,25 +71,6 @@ fn get_default_db_path() -> PathBuf {
 /// * `is_done` - Whether todo is completed (done=5)
 /// * `display_ids` - All display IDs for parent lookup
 /// * `use_order` - Whether ordered display (sub-todos under parent)
-
-/// Highlight keyword in text with blue color
-fn highlight_keyword(text: &str, keyword: &str) -> String {
-    if keyword.is_empty() {
-        return text.to_string();
-    }
-    let lower_text = text.to_lowercase();
-    let lower_keyword = keyword.to_lowercase();
-    
-    if let Some(pos) = lower_text.find(&lower_keyword) {
-        let before = &text[..pos];
-        let match_text = &text[pos..pos + keyword.len()];
-        let after = &text[pos + keyword.len()..];
-        format!("{}\x1b[38;2;59;130;246m{}\x1b[0m{}", before, match_text, after)
-    } else {
-        text.to_string()
-    }
-}
-
 fn format_todo(
     num: usize,
     width: usize,
@@ -226,9 +208,18 @@ fn list_todos(
 
     // Sort incomplete (respecting order mode)
     let display_incomplete: Vec<_> = if use_order {
-        // Separate parents and children
-        let mut parents: Vec<_> = incomplete.iter().filter(|t| t.up_id.is_none()).cloned().collect();
-        let children: Vec<_> = incomplete.iter().filter(|t| t.up_id.is_some()).cloned().collect();
+        // Parent IDs of completed todos
+        let completed_ids: std::collections::HashSet<i64> = completed.iter().map(|t| t.id).collect();
+        
+        // Parents: incomplete todos without parent (or parent is completed)
+        let mut parents: Vec<_> = incomplete.iter().filter(|t| {
+            t.up_id.is_none() || t.up_id.map(|id| completed_ids.contains(&id)).unwrap_or(false)
+        }).cloned().collect();
+        
+        // Children: incomplete todos whose parent is in the parents list
+        let children: Vec<_> = incomplete.iter().filter(|t| {
+            t.up_id.map(|id| parents.iter().any(|p| p.id == id)).unwrap_or(false)
+        }).cloned().collect();
 
         // Sort parents by due date, priority, created
         parents.sort_by(|a, b| {
@@ -506,95 +497,8 @@ fn main() {
                     println!("사용법: search <검색어>");
                 } else {
                     let keyword = rest.join(" ");
-                    match repo.search(&keyword) {
-                        Ok(todos) => {
-                            if todos.is_empty() {
-                                println!("'{}'(이)란 단어를 포함한 할일이 없습니다.", keyword);
-                            } else {
-                                let total = todos.len();
-                                let width = total.to_string().len();
-                                
-                                // Function to display a page
-                                let display_page = |start: usize, end: usize| {
-                                    for seq in start..end {
-                                        if let Some(todo) = todos.get(seq) {
-                                            let is_done = todo.done == 5;
-                                            let parent_ref = todo.up_id.and_then(|pid| {
-                                                todos.iter().position(|t| t.id == pid).map(|i| i + 1)
-                                            });
-                                            let parent_str = parent_ref.map(|p| format!("\x1b[38;2;156;163;175m{}> \x1b[0m", p)).unwrap_or_default();
-                                            
-                                            let due_str = todo.due_date.as_ref()
-                                                .and_then(|d| formatters::format_date(d))
-                                                .map(|d| format!(" @{}", d))
-                                                .unwrap_or_default();
-                                            
-                                            let done = todo.done;
-                                            let is_complete = done == 5;
-                                            
-                                            let progress_str = if done > 0 && !is_complete {
-                                                format!(" {}%", done * 20)
-                                            } else if is_complete {
-                                                todo.done_at.as_ref()
-                                                    .and_then(|d| formatters::format_date(d))
-                                                    .map(|d| format!(" %{}{}", d, "\x1b[0m"))
-                                                    .unwrap_or_default()
-                                            } else {
-                                                String::new()
-                                            };
-                                            
-                                            println!("{:>width$} [{}] {}{}{} ^{}{}", 
-                                                seq + 1,
-                                                if is_complete { "x" } else { " " },
-                                                parent_str,
-                                                highlight_keyword(&todo.todo, &keyword),
-                                                due_str,
-                                                todo.priority,
-                                                progress_str,
-                                                width = width
-                                            );
-                                        }
-                                    }
-                                };
-                                
-                                println!("=== 검색 결과: {}개 ===", total);
-                                display_page(0, 10.min(total));
-                                
-                                let mut current_end = 10.min(total);
-                                
-                                // Continue showing pages
-                                while current_end < total {
-                                    println!("\n... more:Enter, end search:q");
-                                    let mut input = String::new();
-                                    std::io::Write::flush(&mut std::io::stdout()).unwrap();
-                                    if std::io::stdin().read_line(&mut input).is_err() {
-                                        break;
-                                    }
-                                    let input = input.trim();
-                                    // Single char 'q' or 'ㅂ' = quit, Enter = next page
-                                    if input.is_empty() {
-                                        // Show next page
-                                        let start = current_end;
-                                        let end = (start + 10).min(total);
-                                        display_page(start, end);
-                                        current_end = end;
-                                    } else if input == "q" || input == "ㅂ" {
-                                        break;
-                                    } else {
-                                        // Any other input = next page
-                                        let start = current_end;
-                                        let end = (start + 10).min(total);
-                                        display_page(start, end);
-                                        current_end = end;
-                                    }
-                                }
-                                
-                                if current_end >= total {
-                                    println!("\n[검색결과 끝]");
-                                }
-                            }
-                        }
-                        Err(e) => println!("검색 오류: {}", e),
+                    if let Err(e) = cmd_search(&repo, &keyword) {
+                        println!("검색 오류: {}", e);
                     }
                 }
             }

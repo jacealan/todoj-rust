@@ -11,50 +11,13 @@ use chrono::{Datelike, Local, NaiveDate};
 
 /// ANSI color codes for terminal output
 pub mod colors {
-    /// Reset color to default
-    pub const RESET: &str = "\x1b[0m";
-    
-    /// Bold reset
-    pub const BOLD_RESET: &str = "\x1b[0;1m";
-    
-    // Priority colors (softer)
-    /// Priority 1 - Soft orange
-    pub const PRIORITY_1: &str = "\x1b[38;2;235;137;53m"; // #EB8935
-    /// Priority 2 - Soft blue  
-    pub const PRIORITY_2: &str = "\x1b[38;2;59;130;246m"; // #3B82F6
-    /// Priority 3 - Soft green
-    pub const PRIORITY_3: &str = "\x1b[38;2;52;211;153m"; // #34D399
-    /// Priority 4 - Soft gray
-    pub const PRIORITY_4: &str = "\x1b[38;2;156;163;175m"; // #9CA3AF
-    
-    // Due date colors (softer)
+    /// Due date colors (softer)
     /// Today/overdue - Soft red
     pub const DUE_TODAY: &str = "\x1b[38;2;239;68;68m";   // #EF4444
     /// This week - Soft yellow
     pub const DUE_WEEK: &str = "\x1b[38;2;251;191;36m";   // #FBBF24
     /// Future - Soft green
     pub const DUE_FUTURE: &str = "\x1b[38;2;34;197;94m";    // #22C55E
-    
-    // Done color
-    /// Completed - Soft green
-    pub const DONE: &str = "\x1b[38;2;52;211;153m";      // #34D399
-}
-
-/// Get color for priority level
-/// 
-/// # Arguments
-/// * `priority` - Priority level (1-4)
-/// 
-/// # Returns
-/// * ANSI color code
-pub fn color_for_priority(priority: i32) -> &'static str {
-    match priority {
-        1 => colors::PRIORITY_1,
-        2 => colors::PRIORITY_2,
-        3 => colors::PRIORITY_3,
-        4 => colors::PRIORITY_4,
-        _ => colors::RESET,
-    }
 }
 
 /// Get color for due date
@@ -94,35 +57,22 @@ pub fn color_for_due_date(due_date: &str) -> &'static str {
     }
 }
 
-/// Get color for done status
-/// 
-/// # Arguments
-/// * `done` - Done level (0-5)
-/// 
-/// # Returns
-/// * ANSI color code (green if done=5)
-pub fn color_for_done(done: i32) -> &'static str {
-    if done == 5 {
-        colors::DONE
-    } else {
-        colors::RESET
+/// Highlight keyword in text with blue color
+pub fn highlight_keyword(text: &str, keyword: &str) -> String {
+    if keyword.is_empty() {
+        return text.to_string();
     }
-}
-
-/// Get current datetime as formatted string
-/// 
-/// Format: "YYYYMMDDTHHMMSS" (e.g., "20260315T143052")
-/// Used for created_at and updated_at timestamps in database.
-pub fn now_datetime() -> String {
-    chrono::Utc::now().format("%Y%m%dT%H%M%S").to_string()
-}
-
-/// Get current date as formatted string
-/// 
-/// Format: "YYYYMMDD" (e.g., "20260315")
-/// Used for due_date and done_at in database.
-pub fn now_date() -> String {
-    Local::now().format("%Y%m%d").to_string()
+    let lower_text = text.to_lowercase();
+    let lower_keyword = keyword.to_lowercase();
+    
+    if let Some(pos) = lower_text.find(&lower_keyword) {
+        let before = &text[..pos];
+        let match_text = &text[pos..pos + keyword.len()];
+        let after = &text[pos + keyword.len()..];
+        format!("{}\x1b[38;2;59;130;246m{}\x1b[0m{}", before, match_text, after)
+    } else {
+        text.to_string()
+    }
 }
 
 /// Get current date and time for prompt
@@ -135,20 +85,6 @@ pub fn now_prompt() -> String {
 /// Format database date string for display
 /// 
 /// Converts "YYYYMMDD" to "YY-MM-DD(Wday)" format.
-/// 
-/// # Arguments
-/// * `date_str` - Date string in "YYYYMMDD" format
-/// 
-/// # Returns
-/// * `Some("YY-MM-DD(Wday)")` if valid date
-/// * `None` if invalid or too short
-/// 
-/// # Examples
-/// 
-/// ```rust
-/// let formatted = format_date("20260315").unwrap();
-/// assert_eq!(formatted, "26-03-15(일)");
-/// ```
 pub fn format_date(date_str: &str) -> Option<String> {
     if date_str.len() >= 8 {
         let year: i32 = date_str[..4].parse().ok()?;
@@ -165,25 +101,7 @@ pub fn format_date(date_str: &str) -> Option<String> {
 
 /// Parse user date input into database format
 /// 
-/// Supports multiple input formats:
-/// - Day only: "15" -> current month, day 15
-/// - Month/Day: "3/15" or "3-15" -> month/day
-/// - Full: "2026/3/15" or "2026-3-15" or "26/3/15"
-/// 
-/// # Arguments
-/// * `input` - Date string in various formats
-/// 
-/// # Returns
-/// * `Some("YYYYMMDD")` if valid date input
-/// * `None` if invalid or unparseable
-/// 
-/// # Examples
-/// 
-/// ```rust
-/// assert_eq!(parse_date("15"), Some("20260315".to_string()));  // Today
-/// assert_eq!(parse_date("3/15"), Some("20260315".to_string()));
-/// assert_eq!(parse_date("26-3-15"), Some("20260315".to_string()));
-/// ```
+/// Supports: day-only (15), month/day (3/15), full (26/3/15), keywords (@today, @tom, @월, @내일, etc.)
 pub fn parse_date(input: &str) -> Option<String> {
     let today = Local::now().naive_local().date();
     let today_wd = today.weekday();
@@ -545,16 +463,6 @@ pub fn show_calendar_weeks() {
     if dates.len() % 7 != 0 {
         println!();
     }
-}
-
-/// Calculate ISO week number for a given date
-fn iso_week_number(year: i32, month: u32, day: u32) -> u32 {
-    let date = match NaiveDate::from_ymd_opt(year, month, day) {
-        Some(d) => d,
-        None => return 1,
-    };
-    let iso = date.format("%V").to_string();
-    iso.parse().unwrap_or(1)
 }
 
 /// Parse calendar arguments to year and month

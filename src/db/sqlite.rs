@@ -50,21 +50,6 @@ impl SqliteRepo {
     }
 }
 
-/// PostgreSQL placeholder for future implementation
-/// 
-/// Will be implemented with async PostgreSQL driver
-/// when web API layer is added.
-pub struct PostgresRepo;
-
-impl PostgresRepo {
-    /// Create placeholder PostgreSQL repository
-    /// 
-    /// Not yet implemented - requires async runtime.
-    pub fn new(_connection_string: String) -> Self {
-        Self
-    }
-}
-
 impl TodoRepository for SqliteRepo {
     /// Initialize SQLite database
     /// 
