@@ -211,24 +211,19 @@ pub fn parse_date(input: &str) -> Option<String> {
     let parts: Vec<&str> = input.split(|c| c == '/' || c == '-').collect();
 
     match parts.len() {
-        // Day only: "15" means 15th of current month - use next month if past
+        // Day only: find nearest future date with that day
         1 => {
             let day: u32 = parts[0].parse().ok()?;
             if day < 1 || day > 31 {
                 return None;
             }
-            let date = NaiveDate::from_ymd_opt(today.year(), today.month(), day);
-            if date.is_some() {
-                return date.map(|d| d.format("%Y%m%d").to_string());
-            }
-            // Next month if day already passed
-            let next_month = if today.month() == 12 { 
-                (1, today.year() + 1) 
-            } else { 
-                (today.month() + 1, today.year()) 
-            };
-            if day <= days_in_month(next_month.0, next_month.1) {
-                return Some(NaiveDate::from_ymd_opt(next_month.1, next_month.0, day).unwrap().format("%Y%m%d").to_string());
+            // Search for nearest future date with that day
+            let mut check_date = today;
+            for _ in 0..365 {
+                check_date = check_date + chrono::Duration::days(1);
+                if check_date.day() as u32 == day {
+                    return Some(check_date.format("%Y%m%d").to_string());
+                }
             }
             None
         }
@@ -236,7 +231,10 @@ pub fn parse_date(input: &str) -> Option<String> {
         2 => {
             let month: u32 = parts[0].parse().ok()?;
             let day: u32 = parts[1].parse().ok()?;
-            if month < 1 || month > 12 || day < 1 || day > 31 {
+            if month < 1 || month > 12 {
+                return None;
+            }
+            if day < 1 || day > 31 {
                 return None;
             }
             if day > days_in_month(month, today.year()) {
@@ -258,7 +256,10 @@ pub fn parse_date(input: &str) -> Option<String> {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
             let day: u32 = parts[2].parse().ok()?;
-            if month < 1 || month > 12 || day < 1 || day > 31 {
+            if month < 1 || month > 12 {
+                return None;
+            }
+            if day < 1 || day > 31 {
                 return None;
             }
             let full_year = if year < 100 { 2000 + year } else { year };

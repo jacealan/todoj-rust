@@ -203,7 +203,24 @@ pub fn cmd_add(
                 }
                 due_date = parse_date(args[i + 1]);
                 if due_date.is_none() && args[i + 1].chars().any(|c| c.is_ascii_digit()) {
-                    return Err(format!("잘못된 날짜입니다: {} - calendar 명령어로 확인하세요.", args[i + 1]));
+                    let arg = args[i + 1];
+                    let is_single_number = !arg.contains('/') && !arg.contains('-') && arg.chars().all(|c| c.is_ascii_digit());
+                    let suggestion = if is_single_number {
+                        if let Ok(num) = arg.parse::<u32>() {
+                            if num == 0 {
+                                "유효한 날짜가 아닙니다. 1~31 사이 날짜".to_string()
+                            } else if num > 31 {
+                                format!("{}일은 없습니다. 1~31 사이 날짜를 입력해주세요.", num)
+                            } else {
+                                "유효한 날짜가 아닙니다.".to_string()
+                            }
+                        } else {
+                            "유효한 날짜가 아닙니다.".to_string()
+                        }
+                    } else {
+                        "유효한 날짜가 아닙니다.".to_string()
+                    };
+                    return Err(format!("잘못된 날짜입니다: {} - {}", arg, suggestion));
                 }
                 i += 2;
             }
@@ -258,13 +275,27 @@ pub fn cmd_add(
         if let Some(last) = words.last() {
             if last.starts_with('@') && last.len() > 1 {
                 let inner = last.strip_prefix('@').unwrap_or("");
-                if (inner.chars().all(|c| c.is_ascii_digit()) || inner.contains('/') || inner.contains('-')) && inline_due.is_none() {
-                    let suggestion = if inner.contains('/') { 
+                // Check if invalid date pattern (parse_date returned None)
+                if inline_due.is_none() && (inner.chars().all(|c| c.is_ascii_digit()) || inner.contains('/') || inner.contains('-')) {
+                    let is_single_number = !inner.contains('/') && !inner.contains('-') && inner.chars().all(|c| c.is_ascii_digit());
+                    let suggestion = if is_single_number {
+                        if let Ok(num) = inner.parse::<u32>() {
+                            if num == 0 {
+                                "유효한 날짜가 아닙니다. 1~31 사이 날짜".to_string()
+                            } else if num > 31 {
+                                format!("{}일은 없습니다. 1~31 사이 날짜를 입력해주세요.", num)
+                            } else {
+                                "유효한 날짜가 아닙니다.".to_string()
+                            }
+                        } else {
+                            "유효한 날짜가 아닙니다.".to_string()
+                        }
+                    } else if inner.contains('/') { 
                         "월/일 형식으로 입력: @월/일 (예: @3/15, @12/31)".to_string() 
                     } else if inner.contains('-') {
                         "년-월-일 형식으로 입력: @년-월-일 (예: @26-3-15)".to_string()
                     } else {
-                        format!("{}월의 날짜가 없습니다. calendar 명령어로 확인하세요.", inner)
+                        "유효한 날짜가 아닙니다.".to_string()
                     };
                     return Err(format!("잘못된 날짜입니다: @{} - {}", inner, suggestion));
                 }
@@ -397,8 +428,24 @@ pub fn cmd_edit(
             if let Some(last) = words.last() {
                 if last.starts_with('@') && last.len() > 1 {
                     let inner = last.strip_prefix('@').unwrap_or("");
-                    if (inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())) && inline_due.is_none() {
-                        return Err(format!("잘못된 날짜입니다: @{} - calendar 명령어로 확인하세요.", inner));
+                    if inline_due.is_none() && (inner.contains('/') || inner.contains('-') || inner.chars().all(|c| c.is_ascii_digit())) {
+                        let is_single_number = !inner.contains('/') && !inner.contains('-') && inner.chars().all(|c| c.is_ascii_digit());
+                        let suggestion = if is_single_number {
+                            if let Ok(num) = inner.parse::<u32>() {
+                                if num == 0 {
+                                    "유효한 날짜가 아닙니다. 1~31 사이 날짜".to_string()
+                                } else if num > 31 {
+                                    format!("{}일은 없습니다. 1~31 사이 날짜를 입력해주세요.", num)
+                                } else {
+                                    "유효한 날짜가 아닙니다.".to_string()
+                                }
+                            } else {
+                                "유효한 날짜가 아닙니다.".to_string()
+                            }
+                        } else {
+                            "유효한 날짜가 아닙니다.".to_string()
+                        };
+                        return Err(format!("잘못된 날짜입니다: @{} - {}", inner, suggestion));
                     }
                 }
             }
