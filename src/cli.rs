@@ -83,6 +83,9 @@ fn normalize_cmd(input: &str) -> String {
         "p" => "past".to_string(),
         "ㅗ" => "help".to_string(),
         "ㅂ" => "quit".to_string(),
+        "ㅡ" => "more".to_string(),
+        "m" => "more".to_string(),
+        "more" => "more".to_string(),
         "search" => "search".to_string(),
         _ => input.to_string(),
     }

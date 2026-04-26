@@ -495,6 +495,15 @@ fn main() {
                     println!("{}", e);
                 }
             }
+            "more" | "m" | "ㅡ" => {
+                if rest.is_empty() {
+                    println!("사용법: more <리스트번호>[,...] [-d 날짜] [-p 우선순위] [-u 리스트번호]");
+                } else if let Ok(updated) = commands::cmd_more(&repo, &rest, &display_ids) {
+                    needs_redraw = updated;
+                } else if let Err(e) = commands::cmd_more(&repo, &rest, &display_ids) {
+                    println!("{}", e);
+                }
+            }
             "list" | "l" => {
                 let (limit, page, range_start, range_end) = parse_list_range(&rest);
                 match list_todos(

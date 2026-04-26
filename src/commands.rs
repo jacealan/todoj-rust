@@ -124,6 +124,39 @@ fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
     (new_content, due_date, priority)
 }
 
+/// Parse only due_date and priority from input (for override in more command)
+fn parse_inline_due_pri(input: &str) -> (Option<String>, Option<i32>) {
+    let words: Vec<&str> = input.split_whitespace().collect();
+    if words.is_empty() {
+        return (None, None);
+    }
+    
+    let last = words.last().unwrap_or(&"");
+    let second_last = words.get(words.len().saturating_sub(2));
+    
+    // Check for ^priority
+    let priority = if last.starts_with('^') && last.len() > 1 {
+        last[1..].parse::<i32>().ok().filter(|&p| (1..=4).contains(&p))
+    } else {
+        None
+    };
+    
+    // Check for @date at end or second to last
+    let due_date = if last.starts_with('@') && last.len() > 1 {
+        parse_date(&last[1..])
+    } else if let Some(sl) = second_last {
+        if sl.starts_with('@') && priority.is_some() {
+            parse_date(&sl[1..])
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    (due_date, priority)
+}
+
 /// Add a new todo item
 /// 
 /// Creates a new todo in the database.
@@ -581,6 +614,103 @@ pub fn cmd_done(
         repo.set_done(id, level)?;
     }
     println!("완료 상태가 변경되었습니다.");
+    Ok(true)
+}
+
+/// Clone (once more) todo(s)
+///
+/// Creates copies of existing todo(s).
+/// Copies: content, up_id, priority
+/// Resets: due_date, done, done_at
+/// Supports optional overrides with -d, -p, -u flags
+///
+/// # Arguments
+/// * `repo` - Database repository
+/// * `args` - Source todo number(s) plus optional -d/-p/-u overrides
+/// * `display_ids` - Current display IDs
+///
+/// # Returns
+/// * `Ok(true)` on success
+/// * `Err(message)` on error
+pub fn cmd_more(
+    repo: &Arc<dyn TodoRepository>,
+    args: &[&str],
+    display_ids: &[i64],
+) -> Result<bool, String> {
+    if args.is_empty() {
+        return Err("사용법: more <리스트번호>[,...] [-d 날짜] [-p 우선순위] [-u 리스트번호]".to_string());
+    }
+    
+    let nums = cli::parse_numbers(args[0]);
+    let mut valid_ids = Vec::new();
+    for n in &nums {
+        if *n == 0 || *n > display_ids.len() {
+            return Err("유효한 리스트 번호를 입력해주세요.".to_string());
+        }
+        valid_ids.push(display_ids[*n - 1]);
+    }
+    
+    // Parse override options (-d, -p, -u) and inline (@date, ^priority)
+    let mut new_due_date = None;
+    let mut new_priority = None;
+    let mut new_up_id = None;
+    let mut content_args: Vec<&str> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i] {
+            "-d" if i + 1 < args.len() => {
+                new_due_date = parse_date(args[i + 1]);
+                i += 2;
+            }
+            "-p" if i + 1 < args.len() => {
+                new_priority = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-u" if i + 1 < args.len() => {
+                if let Ok(num) = args[i + 1].parse::<usize>() {
+                    if num == 0 {
+                        new_up_id = None;
+                    } else if num > 0 && num <= display_ids.len() {
+                        new_up_id = Some(display_ids[num - 1]);
+                    }
+                }
+                i += 2;
+            }
+            _ => {
+                content_args.push(args[i]);
+                i += 1;
+            }
+        }
+    }
+    
+    // Parse inline @date and ^priority from content args
+    if !content_args.is_empty() {
+        let combined = content_args.join(" ");
+        let (inline_due, inline_pri) = parse_inline_due_pri(&combined);
+        if new_due_date.is_none() {
+            new_due_date = inline_due;
+        }
+        if new_priority.is_none() {
+            new_priority = inline_pri;
+        }
+    }
+    
+    // Get source todos and create clones
+    for id in valid_ids {
+        let source = repo.find_by_id(id)?
+            .ok_or_else(|| format!("ID {}를 찾을 수 없습니다.", id))?;
+        let content = source.todo;
+        let up_id = new_up_id.or(source.up_id);
+        let priority = new_priority.unwrap_or(source.priority);
+        
+        repo.create(NewTodo {
+            todo: content,
+            due_date: new_due_date.clone(),
+            priority: Some(priority),
+            up_id,
+        })?;
+    }
+    println!("복제되었습니다.");
     Ok(true)
 }
 
