@@ -125,6 +125,13 @@ pub fn now_date() -> String {
     Local::now().format("%Y%m%d").to_string()
 }
 
+/// Get current date and time for prompt
+/// 
+/// Format: "[YY-MM-DD HH:MM]"
+pub fn now_prompt() -> String {
+    Local::now().format("[%y-%m-%d(%a) %H:%M]").to_string()
+}
+
 /// Format database date string for display
 /// 
 /// Converts "YYYYMMDD" to "YY-MM-DD(Wday)" format.

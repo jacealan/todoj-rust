@@ -37,7 +37,7 @@ mod formatters;
 use clap::Parser;
 use cli::{parse_command, parse_list_range, Args};
 use db::{SqliteRepo, Todo, TodoRepository};
-use formatters::{clear_screen, print_help, show_calendar, show_calendar_weeks, parse_calendar_args};
+use formatters::{clear_screen, print_help, show_calendar, show_calendar_weeks, parse_calendar_args, now_prompt};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -399,7 +399,9 @@ fn main() {
 
     // Interactive loop
     loop {
-        print!("\n> ");
+        println!();
+        println!("{}", now_prompt());
+        print!("|> ");
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_err() {
