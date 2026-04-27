@@ -52,45 +52,63 @@ fn get_default_db_path() -> PathBuf {
 }
 
 /// Build parent chain (e.g., "1>2>" for multi-level parent)
-fn build_parent_chain(parent_id: i64, display_ids: &[i64], all_todos: &[Todo]) -> String {
+fn build_parent_chain(
+    parent_id: i64,
+    display_ids: &[i64],
+    all_todos: &[Todo],
+    id_to_pos: &std::collections::HashMap<i64, usize>,
+    _completed_done: bool,
+) -> String {
     let parent_color = "\x1b[38;2;156;163;175m";
     let reset = "\x1b[0m";
     let all_ids: std::collections::HashSet<i64> = all_todos.iter().map(|t| t.id).collect();
+    let display_id_set: std::collections::HashSet<i64> = display_ids.iter().cloned().collect();
     
-    // Collect parent IDs from root to immediate (1->2->3)
-    let mut parent_ids: Vec<i64> = Vec::new();
+    // Collect parent chain: start from immediate parent, go up to root
+    let mut parent_chain: Vec<i64> = Vec::new();
     let mut current_id = Some(parent_id);
     
     while let Some(id) = current_id {
         if let Some(p) = all_todos.iter().find(|t| t.id == id) {
-            parent_ids.push(p.id);
+            parent_chain.push(p.id);
+            // Stop if parent is completed (done=5)
+            if p.done == 5 {
+                break;
+            }
             current_id = p.up_id;
         } else if all_ids.contains(&id) {
-            // Found but deleted - mark as x>
-            parent_ids.push(id);
+            parent_chain.push(id);
             break;
         } else {
-            // Not found - mark as x> and stop
-            parent_ids.push(id);
+            parent_chain.push(id);
             break;
         }
     }
     
-    // Reverse: from root to immediate parent
-    parent_ids.reverse();
+    // Reverse: from root to immediate
+    parent_chain.reverse();
     
-    // Build chain string (1>2> instead of 2>1>)
+    // Build chain string
     let mut chain = String::new();
-    let display_id_set: std::collections::HashSet<i64> = display_ids.iter().cloned().collect();
     
-    for id in &parent_ids {
+    for id in &parent_chain {
+        let is_completed = all_todos.iter().any(|t| t.id == *id && t.done == 5);
+        
         if display_id_set.contains(id) {
-            // Parent is visible in display - show list number
-            if let Some(pos) = display_ids.iter().position(|&x| x == *id) {
+            if let Some(&pos) = id_to_pos.get(id) {
                 chain.push_str(&format!("{}{}>", parent_color, pos + 1));
+            } else if is_completed {
+                // Completed parent - use its display number from all todos in list
+                if let Some(pos) = display_ids.iter().position(|&x| x == *id) {
+                    chain.push_str(&format!("{}{}>", parent_color, pos + 1));
+                } else {
+                    chain.push_str(&format!("{}x>", parent_color));
+                }
             }
+        } else if is_completed {
+            // Completed parent not in incomplete list - show x>
+            chain.push_str(&format!("{}x>", parent_color));
         } else {
-            // Parent not visible - show x>
             chain.push_str(&format!("{}x>", parent_color));
         }
     }
@@ -131,6 +149,7 @@ fn format_todo(
     display_ids: &[i64],
     use_order: bool,
     all_todos: &[Todo],
+    id_to_pos: &std::collections::HashMap<i64, usize>,
 ) -> String {
     let num_str = format!("{}", num);
     let padded_num = format!("{:>width$}", num_str);
@@ -145,7 +164,7 @@ fn format_todo(
 
     // Build parent chain (e.g., "1>2>" for multi-level parent)
     let parent_str = if let Some(parent_id) = item.up_id {
-        build_parent_chain(parent_id, display_ids, all_todos)
+        build_parent_chain(parent_id, display_ids, all_todos, id_to_pos, is_done)
     } else {
         String::new()
     };
@@ -269,80 +288,87 @@ fn list_todos(
         return Ok((Vec::new(), Vec::new()));
     }
 
-    // Sort incomplete (respecting order mode)
+// Sort incomplete (respecting order mode)
     let display_incomplete: Vec<_> = if use_order {
-        // IDs in incomplete list
-        let incomplete_ids: std::collections::HashSet<i64> = incomplete.iter().map(|t| t.id).collect();
-        
-        // Deleted IDs from all_todos
-        let deleted_ids: std::collections::HashSet<i64> = all_todos.iter()
-            .filter(|t| t.deleted_at.is_some())
-            .map(|t| t.id)
+        // Build full tree with ALL todos (completed/deleted 포함)
+        // Then extract only incomplete items in hierarchy order
+        let all_by_id: std::collections::HashMap<i64, &Todo> = all_todos.iter()
+            .map(|t| (t.id, t))
             .collect();
         
-        // Recursive function to add item and all its descendants
-        fn add_with_descendants<'a>(
-            item: &'a Todo,
-            incomplete: &'a[Todo],
-            ordered: &mut Vec<&'a Todo>
-        ) {
-            if !ordered.iter().any(|x| x.id == item.id) {
-                ordered.push(item);
-            }
-            // Add all children of this item
-            for child in incomplete {
-                if child.up_id == Some(item.id) {
-                    add_with_descendants(child, incomplete, ordered);
-                }
-            }
-        }
+        let incomplete_ids: std::collections::HashSet<i64> = incomplete.iter().map(|t| t.id).collect();
         
-        // Top-level: no parent OR parent is completed OR parent is deleted or not in incomplete
-        let top_level: Vec<_> = incomplete.iter()
+        // Find roots from full tree: items whose parent is not in all_todos OR parent is None
+        let roots: Vec<_> = all_todos.iter()
             .filter(|t| {
-                if t.up_id.is_none() {
-                    true // No parent
-                } else if let Some(pid) = t.up_id {
-                    // Check if parent chain is broken
-                    let parent_in_incomplete = incomplete_ids.contains(&pid);
-                    let parent_deleted = deleted_ids.contains(&pid);
-                    parent_in_incomplete == false || parent_deleted
-                } else {
-                    false
+                match t.up_id {
+                    None => true,
+                    Some(pid) => !all_by_id.contains_key(&pid)
                 }
             })
             .collect();
         
-        // Sort top-level by due date, priority, created
-        let mut sorted_toplevel: Vec<_> = top_level.iter().collect();
-        sorted_toplevel.sort_by(|a, b| {
-            let a_has_due = a.due_date.is_some();
-            let b_has_due = b.due_date.is_some();
-            if a_has_due != b_has_due {
-                b_has_due.cmp(&a_has_due)
+        // Build hierarchy recursively
+        fn add_with_children<'a>(
+            item: &'a Todo,
+            all_todos: &'a[Todo],
+            incomplete_ids: &std::collections::HashSet<i64>,
+            result: &mut Vec<&'a Todo>
+        ) {
+            // Only add if incomplete
+            if incomplete_ids.contains(&item.id) {
+                if !result.iter().any(|x| x.id == item.id) {
+                    result.push(item);
+                }
+            }
+            // Find all children from full tree
+            let mut children: Vec<_> = all_todos.iter()
+                .filter(|c| c.up_id == Some(item.id))
+                .collect();
+            // Sort children by due_date
+            children.sort_by(|a, b| {
+                let a_due = a.due_date.as_deref();
+                let b_due = b.due_date.as_deref();
+                match (a_due, b_due) {
+                    (None, None) => a.id.cmp(&b.id),
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (Some(ad), Some(bd)) => {
+                        if ad != bd {
+                            ad.cmp(bd)
+                        } else {
+                            a.priority.cmp(&b.priority)
+                        }
+                    }
+                }
+            });
+            for child in children {
+                add_with_children(child, all_todos, incomplete_ids, result);
+            }
+        }
+        
+        // Sort roots by due_date
+        let mut sorted_roots: Vec<_> = roots.iter().collect();
+        sorted_roots.sort_by(|a, b| {
+            let a_has = a.due_date.is_some();
+            let b_has = b.due_date.is_some();
+            if a_has != b_has {
+                b_has.cmp(&a_has)
             } else {
-                a.due_date
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("")
-                    .cmp(b.due_date.as_ref().map(|s| s.as_str()).unwrap_or(""))
-                    .then(a.priority.cmp(&b.priority))
-                    .then(b.id.cmp(&a.id))
+                a.due_date.cmp(&b.due_date).then(a.priority.cmp(&b.priority)).then(b.id.cmp(&a.id))
             }
         });
         
-        // Build ordered list recursively
         let mut ordered: Vec<&Todo> = Vec::new();
-        for item in sorted_toplevel {
-            add_with_descendants(item, &incomplete, &mut ordered);
+        for root in sorted_roots {
+            add_with_children(root, &all_todos, &incomplete_ids, &mut ordered);
         }
         
-        // Add remaining items (shouldn't happen but just in case)
-        let remaining: Vec<_> = incomplete.iter()
-            .filter(|t| !ordered.iter().any(|x| x.id == t.id))
-            .collect();
-        for item in remaining {
-            add_with_descendants(item, &incomplete, &mut ordered);
+        // Add any remaining incomplete items not added (shouldn't happen)
+        for item in &incomplete {
+            if !ordered.iter().any(|x| x.id == item.id) {
+                ordered.push(item);
+            }
         }
         
         ordered.into_iter().cloned().collect()
@@ -398,9 +424,28 @@ fn list_todos(
             None => display_incomplete.iter().enumerate().collect(),
         };
 
-        // Collect IDs first
-        for (_, item) in &filtered {
+        // Collect IDs first and build ID→position mapping
+        // Always include completed items for parent chain lookup (even when not displaying them)
+        let mut id_to_pos: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+        for (idx, item) in &filtered {
+            let pos = *idx;
+            id_to_pos.insert(item.id, pos);
             display_ids.push(item.id);
+        }
+        
+        // Add completed items to id_to_pos (for parent chain lookup)
+        if show_done {
+            for (idx, item) in sorted_completed.iter().enumerate() {
+                let pos = filtered.len() + idx;
+                id_to_pos.insert(item.id, pos);
+                display_ids.push(item.id);
+            }
+        } else {
+            // Even when not showing done, include them for parent chain lookup
+            for (idx, item) in sorted_completed.iter().enumerate() {
+                let pos = filtered.len() + idx;
+                id_to_pos.insert(item.id, pos);
+            }
         }
         // Then format
         for (idx, item) in &filtered {
@@ -412,6 +457,7 @@ fn list_todos(
                 &display_ids,
                 use_order,
                 &all_todos,
+                &id_to_pos,
             ));
         }
     }
@@ -423,6 +469,7 @@ fn list_todos(
         }
         let start_num = incomplete_len + 1;
         let width = (start_num + sorted_completed.len() - 1).to_string().len();
+        let empty_id_to_pos: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
         for (_, item) in sorted_completed.iter().enumerate() {
             display_ids.push(item.id);
         }
@@ -435,6 +482,7 @@ fn list_todos(
                 &display_ids,
                 use_order,
                 &all_todos,
+                &empty_id_to_pos,
             ));
         }
     }
