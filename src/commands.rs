@@ -375,6 +375,7 @@ pub fn cmd_edit(
         let mut due_date = None;
         let mut priority = None;
         let mut up_id = None;
+        let mut clear_up_id = None;
         let mut i = 1;
         while i < args.len() {
             match args[i] {
@@ -389,9 +390,10 @@ pub fn cmd_edit(
                 "-u" if i + 1 < args.len() => {
                     if let Ok(num) = args[i + 1].parse::<usize>() {
                         if num == 0 {
-                            up_id = None;
+                            clear_up_id = Some(true);
                         } else if num > 0 && num <= display_ids.len() {
                             up_id = Some(display_ids[num - 1]);
+                            clear_up_id = Some(false);
                         }
                     }
                     i += 2;
@@ -513,6 +515,7 @@ let final_todo = if let Some(ref raw) = raw_new_content {
                     due_date: final_due.clone(),
                     priority: final_pri,
                     up_id: final_up_id.clone(),
+                    clear_up_id: clear_up_id.clone(),
                 },
             )?;
             updated = true;
@@ -557,6 +560,7 @@ let final_todo = if let Some(ref raw) = raw_new_content {
                         due_date,
                         priority,
                         up_id: None,
+                        clear_up_id: None,
                     },
                 )?;
                 println!("수정되었습니다.");

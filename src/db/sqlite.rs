@@ -174,7 +174,11 @@ impl TodoRepository for SqliteRepo {
             let todo = update.todo.unwrap_or(current.todo);
             let due_date = update.due_date.or(current.due_date);
             let priority = update.priority.unwrap_or(current.priority);
-            let up_id = update.up_id.or(current.up_id);
+            let up_id = if update.clear_up_id == Some(true) {
+                None
+            } else {
+                update.up_id.or(current.up_id)
+            };
             let updated = Utc::now().format("%Y%m%dT%H%M%S").to_string();
 
             conn.execute(

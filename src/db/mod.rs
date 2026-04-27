@@ -64,6 +64,7 @@ pub struct UpdateTodo {
     pub due_date: Option<String>,
     pub priority: Option<i32>,
     pub up_id: Option<i64>,
+    pub clear_up_id: Option<bool>,
 }
 
 /// Database repository trait
