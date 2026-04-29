@@ -6,6 +6,7 @@ A simple yet powerful terminal-based TODO manager written in Rust.
 
 - **CRUD Operations**: Add, edit, remove, and complete todos
 - **Clone Todos**: Clone existing todos with `more` command
+- **Recurring Todos**: Daily, every other day, weekly, monthly, yearly repetition with `-r` flag
 - **Due Date Tracking**: Flexible input formats (3/15, 2026/3/15, @today, @tom, etc.)
 - **Priority Levels**: 1 (highest) to 4 (lowest), default 3
 - **Sub-todos**: Parent-child relationships with `-u` flag or inline format
@@ -85,6 +86,13 @@ add Task @ fri      # Next Friday
 # As sub-task under todo #3
 add Sub-task -u 3
 
+# With repetition (recurring todos)
+add Daily task -r d           # Every day
+add Every other day -r e      # Every 2 days
+add Weekly meeting -r w      # Every week (same weekday)
+add Monthly bill -r 15        # Every month on day 15
+add Birthday -r 2/3          # Every year on Feb 3
+
 # Mixed format
 add Task @today -p 2     # @today as date, -p for priority
 add Task -d 3/25 ^1     # -d for date, ^1 inline
@@ -94,6 +102,12 @@ add Task -d 3/25 ^1     # -d for date, ^1 inline
 - `-d DATE`: Due date (format: d, m/d, y/m/d, or keywords: today, tom, mon, tue, wed, thu, fri, sat, sun)
 - `-p PRIORITY`: Priority 1-4 (default 3)
 - `-u N`: Parent todo number (creates sub-task)
+- `-r PERIOD`: Repetition period:
+  - `d` = daily (every day)
+  - `e` = every other day (every 2 days)
+  - `w` = weekly (same weekday)
+  - `N` = monthly on day N (1-31, adjusts for shorter months)
+  - `M/D` or `M-D` = yearly on month M, day D
 
 **Inline format (at end of content):**
 - `@DATE` - Due date (e.g., `@3/15`, `@today`, `@mon`)
@@ -123,6 +137,8 @@ edit 1
 - `-d DATE`: New due date
 - `-p PRIORITY`: New priority (1-4)
 - `-u N`: Change parent todo number
+- `-r PERIOD`: Change repetition period (same as add)
+- `-r 0`: Clear repetition (remove recurring)
 
 **Inline format (for batch edit):**
 - `@DATE` - Due date
@@ -158,13 +174,24 @@ done 1,2,3 5
 
 **Done Levels:**
 | Level | Meaning |
-|-------|---------|
+|-------|----------|
 | 0 | Not started |
 | 1 | 20% done |
 | 2 | 40% done |
 | 3 | 60% done |
 | 4 | 80% done |
 | 5 | Complete |
+
+**Recurring Todos:**
+When a recurring todo (with `-r` flag) is marked as complete (done=5):
+- A new todo is automatically created with the same content, priority, and parent
+- The new todo's due date is calculated based on the repetition period:
+  - Daily (`-r d`): Next day
+  - Every other day (`-r e`): 2 days later
+  - Weekly (`-r w`): Same weekday next week
+  - Monthly (`-r N`): Same day next month (adjusts for shorter months)
+  - Yearly (`-r M/D`): Same date next year
+- If original todo has no due date, uses completion date as base
 
 ### list (l) - Display todos
 
@@ -334,6 +361,7 @@ CREATE TABLE todos (
     done INTEGER DEFAULT 0,
     done_at TEXT,
     deleted_at TEXT,
+    repetition_period TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -355,6 +383,12 @@ CREATE TABLE todos (
 - `%XX` - Progress percentage
 - `%YY-MM-DD` - Completion date
 - `^N` - Priority (1=high, 4=low)
+- `*X` - Repetition period:
+  - `*D` = daily
+  - `*E` = every other day
+  - `*Mon` = weekly (shows weekday)
+  - `*15` = monthly on day 15
+  - `*2/3` = yearly on Feb 3
 
 ## Color Legend
 
@@ -377,10 +411,10 @@ CREATE TABLE todos (
 
 - [x] Clone todos (`more` command)
 - [x] Multiple databases
+- [x] Recurring todos (`-r` flag)
 - [ ] PostgreSQL support for cross-device sync
 - [ ] Web interface
 - [ ] Tags/categories
-- [ ] Recurring todos
 
 ## License
 

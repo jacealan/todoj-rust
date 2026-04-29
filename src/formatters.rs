@@ -309,12 +309,14 @@ pub fn print_help() {
     println!(
         r#"
 Commands:
-  add <content> [-d date] [-p priority] [-u list#]   Add TODO
+  add <content> [-d date] [-p priority] [-u list#] [-r period]   Add TODO
       @DATE : inline date (e.g., @3/15, @today, @tom)
       ^N   : inline priority (e.g., ^1, ^4)
+      -r   : repetition (d=daily, e=every_other, w=weekly, N=monthly, M/D=yearly)
 
-  edit <list#> [-d date] [-p priority]              Edit TODO
+  edit <list#> [-d date] [-p priority] [-r period]   Edit TODO
       @DATE : inline date, ^N : inline priority
+      -r 0  : clear repetition
 
   remove <list#>[,...]                            Remove TODO (1,2-5, etc)
 
@@ -346,6 +348,7 @@ Keywords: @today, @tom (tomorrow), @mon/@tue/@wed/@thu/@fri/@sat/@sun
  Korean: @오늘, @내일, @월/@화/@수/@목/@금/@토/@일
 Priority: 1 (highest) to 4 (lowest), default 3
 Done levels: 0 (not started) to 5 (complete)
+Repetition: -r d(aily), e(very_other), w(eekly), N(monthly), M/D(yearly)
 Shortcuts: a=ㅁ e=ㄷ r=ㄱ d=ㅇ l=ㅣ c=ㅊ o=ㅐ s=ㄴ p=ㅔ h=ㅗ q=ㅂ
 "#
     );

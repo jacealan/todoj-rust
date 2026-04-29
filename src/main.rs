@@ -191,6 +191,35 @@ fn format_todo(
         format!(" {}^{}{}", pri_color, item.priority, "\x1b[0m")
     };
 
+    // Format repetition period
+    let rep_str = if let Some(ref rep) = item.repetition_period {
+        let short = match rep.as_str() {
+            "daily" => "*D".to_string(),
+            "every_other" => "*E".to_string(),
+            "weekly" => {
+                if let Some(ref due) = item.due_date {
+                    if let (Ok(y), Ok(m), Ok(d)) = (due[..4].parse(), due[4..6].parse(), due[6..8].parse()) {
+                        if let Some(date) = chrono::NaiveDate::from_ymd_opt(y, m, d) {
+                            format!("*{}", date.format("%a"))
+                        } else {
+                            "*W".to_string()
+                        }
+                    } else {
+                        "*W".to_string()
+                    }
+                } else {
+                    "*W".to_string()
+                }
+            }
+            s if s.starts_with("monthly:") => format!("*{}", s.strip_prefix("monthly:").unwrap()),
+            s if s.starts_with("yearly:") => format!("*{}", s.strip_prefix("yearly:").unwrap()),
+            _ => rep.clone(),
+        };
+        format!(" {}", short)
+    } else {
+        String::new()
+    };
+
     // Show progress percentage for incomplete todos (after priority)
     let progress = if !is_done && item.done > 0 {
         format!(" {}%", (item.done as usize) * 20)
@@ -209,15 +238,15 @@ fn format_todo(
 
     let formatted_str = if parent_str != "" {
         format!(
-            "{}{} {} {} {}{}{}{}{}\n",
+            "{}{} {} {} {}{}{}{}{}{}\n",
             padded_num, indent, check, parent_str,
-            item.todo, due_str, priority_str, progress, done_str
+            item.todo, due_str, priority_str, rep_str, progress, done_str
         )
     } else {
         format!(
             "{}{} {} {}{}{}{}{}{}\n",
-            padded_num, indent, check, parent_str,
-            item.todo, due_str, priority_str, progress, done_str
+            padded_num, indent, check,
+            item.todo, due_str, priority_str, rep_str, progress, done_str
         )
     };
 

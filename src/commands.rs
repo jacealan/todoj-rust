@@ -124,6 +124,124 @@ fn parse_inline(input: &str) -> (String, Option<String>, Option<i32>) {
     (new_content, due_date, priority)
 }
 
+/// Parse repetition period from -r argument
+/// 
+/// # Returns
+/// * `Some(period)` - Parsed repetition period string
+/// * `None` - Invalid format
+/// 
+/// # Formats
+/// * `d` -> "daily"
+/// * `e` -> "every_other"
+/// * `w` -> "weekly"
+/// * `N` (1-31) -> "monthly:N"
+/// * `M/D` or `M-D` -> "yearly:M/D"
+fn parse_repetition(arg: &str) -> Option<String> {
+    let s = arg.to_lowercase();
+    match s.as_str() {
+        "d" => Some("daily".to_string()),
+        "e" => Some("every_other".to_string()),
+        "w" => Some("weekly".to_string()),
+        _ => {
+            // Check for monthly: N (1-31)
+            if let Ok(n) = s.parse::<u32>() {
+                if (1..=31).contains(&n) {
+                    return Some(format!("monthly:{}", n));
+                }
+            }
+            // Check for yearly: M/D or M-D
+            if s.contains('/') || s.contains('-') {
+                let sep = if s.contains('/') { '/' } else { '-' };
+                let parts: Vec<&str> = s.split(sep).collect();
+                if parts.len() == 2 {
+                    if let (Ok(m), Ok(d)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                        if (1..=12).contains(&m) && (1..=31).contains(&d) {
+                            return Some(format!("yearly:{}/{}", m, d));
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Calculate next due date based on repetition period
+/// 
+/// # Arguments
+/// * `due_date` - Current due date in "YYYYMMDD" format
+/// * `repetition` - Repetition period string
+/// 
+/// # Returns
+/// * `Some(next_date)` - Next due date in "YYYYMMDD" format
+/// * `None` - No due date or invalid
+fn calculate_next_due(due_date: Option<&str>, repetition: &str) -> Option<String> {
+    use chrono::{Datelike, Duration, NaiveDate};
+
+    let due = match due_date {
+        Some(d) => NaiveDate::parse_from_str(d, "%Y%m%d").ok()?,
+        None => return None,
+    };
+
+    match repetition {
+        "daily" => {
+            let next = due + Duration::days(1);
+            Some(next.format("%Y%m%d").to_string())
+        }
+        "every_other" => {
+            let next = due + Duration::days(2);
+            Some(next.format("%Y%m%d").to_string())
+        }
+        "weekly" => {
+            let next = due + Duration::days(7);
+            Some(next.format("%Y%m%d").to_string())
+        }
+        s if s.starts_with("monthly:") => {
+            let day: u32 = s.strip_prefix("monthly:")?.parse().ok()?;
+            let mut year = due.year();
+            let mut month = due.month() + 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
+            // Adjust day if not valid for the month
+            let max_day = last_day_of_month(year, month);
+            let actual_day = day.min(max_day);
+            let next = NaiveDate::from_ymd_opt(year, month, actual_day)?;
+            Some(next.format("%Y%m%d").to_string())
+        }
+        s if s.starts_with("yearly:") => {
+            let date_part = s.strip_prefix("yearly:")?;
+            let parts: Vec<&str> = date_part.split('/').collect();
+            if parts.len() != 2 {
+                return None;
+            }
+            let month: u32 = parts[0].parse().ok()?;
+            let day: u32 = parts[1].parse().ok()?;
+            let next_year = due.year() + 1;
+            let max_day = last_day_of_month(next_year, month);
+            let actual_day = day.min(max_day);
+            let next = NaiveDate::from_ymd_opt(next_year, month, actual_day)?;
+            Some(next.format("%Y%m%d").to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Get last day of month
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    use chrono::{Datelike, NaiveDate};
+    let next_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+    };
+    match next_month {
+        Some(d) => d.pred_opt().unwrap().day(),
+        None => 28, // fallback
+    }
+}
+
 /// Parse only due_date and priority from input (for override in more command)
 fn parse_inline_due_pri(input: &str) -> (Option<String>, Option<i32>) {
     let words: Vec<&str> = input.split_whitespace().collect();
@@ -191,9 +309,10 @@ pub fn cmd_add(
     let mut due_date = None;
     let mut priority = None;
     let mut up_id = None;
+    let mut repetition_period = None;
     let mut i = 0;
 
-    // First pass: collect raw content and check for -d, -p, -u flags
+    // First pass: collect raw content and check for -d, -p, -u, -r flags
     while i < args.len() {
         match args[i] {
             // Due date: -d 3/15
@@ -246,6 +365,14 @@ pub fn cmd_add(
                     }
                 } else {
                     return Err("잘못된 리스트 번호입니다.".to_string());
+                }
+                i += 2;
+            }
+            // Repetition period: -r d/e/w/N/M-D
+            "-r" if i + 1 < args.len() => {
+                repetition_period = parse_repetition(args[i + 1]);
+                if repetition_period.is_none() {
+                    return Err("잘못된 반복 주기입니다. -r d(매일), e(격일), w(매주), N(매월N일), M/D(매년)".to_string());
                 }
                 i += 2;
             }
@@ -324,6 +451,7 @@ pub fn cmd_add(
         due_date: final_due,
         priority: final_pri,
         up_id,
+        repetition_period,
     })?;
     println!("추가되었습니다.");
     Ok(true)
@@ -370,45 +498,60 @@ pub fn cmd_edit(
             valid_ids.push(display_ids[n - 1]);
         }
 
-        // Parse update options (including inline @date and ^priority, and -u for parent)
-        let mut raw_new_content: Option<String> = None;
-        let mut due_date = None;
-        let mut priority = None;
-        let mut up_id = None;
-        let mut clear_up_id = None;
-        let mut i = 1;
-        while i < args.len() {
-            match args[i] {
-                "-d" if i + 1 < args.len() => {
-                    due_date = parse_date(args[i + 1]);
-                    i += 2;
-                }
-                "-p" if i + 1 < args.len() => {
-                    priority = args[i + 1].parse().ok();
-                    i += 2;
-                }
-                "-u" if i + 1 < args.len() => {
-                    if let Ok(num) = args[i + 1].parse::<usize>() {
-                        if num == 0 {
-                            clear_up_id = Some(true);
-                        } else if num > 0 && num <= display_ids.len() {
-                            up_id = Some(display_ids[num - 1]);
-                            clear_up_id = Some(false);
-                        }
+    // Parse update options (including inline @date and ^priority, and -u for parent)
+    let mut raw_new_content: Option<String> = None;
+    let mut due_date = None;
+    let mut priority = None;
+    let mut up_id = None;
+    let mut clear_up_id = None;
+    let mut repetition_period = None;
+    let mut clear_repetition = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i] {
+            "-d" if i + 1 < args.len() => {
+                due_date = parse_date(args[i + 1]);
+                i += 2;
+            }
+            "-p" if i + 1 < args.len() => {
+                priority = args[i + 1].parse().ok();
+                i += 2;
+            }
+            "-u" if i + 1 < args.len() => {
+                if let Ok(num) = args[i + 1].parse::<usize>() {
+                    if num == 0 {
+                        clear_up_id = Some(true);
+                    } else if num > 0 && num <= display_ids.len() {
+                        up_id = Some(display_ids[num - 1]);
+                        clear_up_id = Some(false);
                     }
-                    i += 2;
                 }
-                _ => {
-                    // Collect other args as content
-                    if raw_new_content.is_none() {
-                        raw_new_content = Some(args[i].to_string());
-                    } else {
-                        raw_new_content = Some(format!("{} {}", raw_new_content.unwrap(), args[i]));
+                i += 2;
+            }
+            "-r" if i + 1 < args.len() => {
+                if args[i + 1] == "0" {
+                    clear_repetition = Some(true);
+                    repetition_period = None;
+                } else {
+                    repetition_period = parse_repetition(args[i + 1]);
+                    if repetition_period.is_none() {
+                        return Err("잘못된 반복 주기입니다. -r d(매일), e(격일), w(매주), N(매월N일), M/D(매년)".to_string());
                     }
-                    i += 1;
+                    clear_repetition = Some(false);
                 }
+                i += 2;
+            }
+            _ => {
+                // Collect other args as content
+                if raw_new_content.is_none() {
+                    raw_new_content = Some(args[i].to_string());
+                } else {
+                    raw_new_content = Some(format!("{} {}", raw_new_content.unwrap(), args[i]));
+                }
+                i += 1;
             }
         }
+    }
 
         // Parse inline @date and ^priority (only if -d/-p NOT provided)
         let use_inline = due_date.is_none() && priority.is_none();
@@ -516,6 +659,8 @@ let final_todo = if let Some(ref raw) = raw_new_content {
                     priority: final_pri,
                     up_id: final_up_id.clone(),
                     clear_up_id: clear_up_id.clone(),
+                    repetition_period: repetition_period.clone(),
+                    clear_repetition: clear_repetition.clone(),
                 },
             )?;
             updated = true;
@@ -533,7 +678,7 @@ let final_todo = if let Some(ref raw) = raw_new_content {
         }
         
         // Prompt for new content (supports inline @date ^priority)
-        println!("사용법: edit {} <새 내용> [-d 날짜] [-p 우선순위] [-u 리스트번호]", num);
+        println!("사용법: edit {} <새 내용> [-d 날짜] [-p 우선순위] [-u 리스트번호] [-r 반복]", num);
         println!("     또는: edit {} <새 내용@날짜 ^우선순위>", num);
         print!("수정: ");
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -542,25 +687,68 @@ let final_todo = if let Some(ref raw) = raw_new_content {
         if std::io::stdin().read_line(&mut input).is_ok() {
             let new_input = input.trim();
             if !new_input.is_empty() {
-                // Use inline parsing - it should extract content without @/^, leaving them as date/priority
-                let (content, due_date, priority) = parse_inline(new_input);
+                // Parse args for -r flag
+                let parts: Vec<&str> = new_input.split_whitespace().collect();
+                let mut content_parts = Vec::new();
+                let mut due_date = None;
+                let mut priority = None;
+                let mut repetition_period = None;
+                let mut clear_repetition = None;
+                let mut i = 0;
                 
-                // Update todo content if changed (parsed doesn't have @ or ^ at end)
-                let update_content = if !content.is_empty() {
+                while i < parts.len() {
+                    match parts[i] {
+                        "-d" if i + 1 < parts.len() => {
+                            due_date = parse_date(parts[i + 1]);
+                            i += 2;
+                        }
+                        "-p" if i + 1 < parts.len() => {
+                            priority = parts[i + 1].parse().ok();
+                            i += 2;
+                        }
+                        "-r" if i + 1 < parts.len() => {
+                            if parts[i + 1] == "0" {
+                                clear_repetition = Some(true);
+                            } else {
+                                repetition_period = parse_repetition(parts[i + 1]);
+                                clear_repetition = Some(false);
+                            }
+                            i += 2;
+                        }
+                        _ => {
+                            content_parts.push(parts[i]);
+                            i += 1;
+                        }
+                    }
+                }
+                
+                let content = content_parts.join(" ");
+                let (inline_content, inline_due, inline_pri) = if content.is_empty() {
+                    (String::new(), None, None)
+                } else {
+                    parse_inline(&content)
+                };
+                
+                let final_content = if !inline_content.is_empty() && inline_content != content {
+                    Some(inline_content)
+                } else if !content.is_empty() {
                     Some(content)
                 } else {
-                    // No inline patterns found, use full input as content
-                    Some(new_input.to_string())
+                    None
                 };
+                let final_due = due_date.or(inline_due);
+                let final_pri = priority.or(inline_pri);
                 
                 repo.update(
                     display_ids[num - 1],
                     UpdateTodo {
-                        todo: update_content,
-                        due_date,
-                        priority,
+                        todo: final_content,
+                        due_date: final_due,
+                        priority: final_pri,
                         up_id: None,
                         clear_up_id: None,
+                        repetition_period,
+                        clear_repetition,
                     },
                 )?;
                 println!("수정되었습니다.");
@@ -625,6 +813,7 @@ pub fn cmd_remove(
 /// - 5: Complete
 /// 
 /// If no level specified, toggles between 0 and 5.
+/// When completing (done=5), creates next repetition if applicable.
 /// 
 /// # Arguments
 /// * `repo` - Database repository
@@ -657,12 +846,30 @@ pub fn cmd_done(
         if *n == 0 || *n > display_ids.len() {
             return Err("유효한 리스트 번호를 입력해주세요.".to_string());
         }
-        valid_ids.push(display_ids[n - 1]);
+        valid_ids.push(display_ids[*n - 1]);
     }
 
     // Set done level for each
     for id in valid_ids {
-        repo.set_done(id, level)?;
+        let todo = repo.set_done(id, level)?;
+        
+        // If completed (done=5) and has repetition, create next todo
+        if todo.done == 5 {
+            if let Some(ref rep) = todo.repetition_period {
+                // Use due_date first, then done_at as base date
+                let base_date = todo.due_date.as_deref().or(todo.done_at.as_deref());
+                let next_due = base_date.and_then(|d| calculate_next_due(Some(d), rep));
+                let new_todo = NewTodo {
+                    todo: todo.todo.clone(),
+                    due_date: next_due,
+                    priority: Some(todo.priority),
+                    up_id: todo.up_id,
+                    repetition_period: Some(rep.clone()),
+                };
+                repo.create(new_todo)?;
+                println!("반복 할일이 생성되었습니다.");
+            }
+        }
     }
     println!("완료 상태가 변경되었습니다.");
     Ok(true)
@@ -759,6 +966,7 @@ pub fn cmd_more(
             due_date: new_due_date.clone(),
             priority: Some(priority),
             up_id,
+            repetition_period: source.repetition_period.clone(),
         })?;
     }
     println!("복제되었습니다.");

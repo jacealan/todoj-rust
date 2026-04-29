@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 /// * `done` - Done level 0-5 (5 = complete)
 /// * `done_at` - Completion date in "YYYYMMDD", nullable
 /// * `deleted_at` - Deletion timestamp, nullable for soft delete
+/// * `repetition_period` - Repetition period (daily, weekly, monthly:N, yearly:M/D), nullable
 /// * `created_at` - Creation timestamp "YYYYMMDDTHHMMSS"
 /// * `updated_at` - Last update timestamp "YYYYMMDDTHHMMSS"
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,7 @@ pub struct Todo {
     pub done: i32,
     pub done_at: Option<String>,
     pub deleted_at: Option<String>,
+    pub repetition_period: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -53,6 +55,7 @@ pub struct NewTodo {
     pub due_date: Option<String>,
     pub priority: Option<i32>,
     pub up_id: Option<i64>,
+    pub repetition_period: Option<String>,
 }
 
 /// Todo update data
@@ -65,6 +68,8 @@ pub struct UpdateTodo {
     pub priority: Option<i32>,
     pub up_id: Option<i64>,
     pub clear_up_id: Option<bool>,
+    pub repetition_period: Option<String>,
+    pub clear_repetition: Option<bool>,
 }
 
 /// Database repository trait

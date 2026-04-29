@@ -20,6 +20,7 @@
 //!     done INTEGER DEFAULT 0,
 //!     done_at TEXT,
 //!     deleted_at TEXT,
+//!     repetition_period TEXT,
 //!     created_at TEXT NOT NULL,
 //!     updated_at TEXT NOT NULL
 //! );
@@ -66,11 +67,24 @@ impl TodoRepository for SqliteRepo {
                     done INTEGER DEFAULT 0,
                     done_at TEXT,
                     deleted_at TEXT,
+                    repetition_period TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )",
                 [],
             ).map_err(|e| e.to_string())?;
+
+            // Add repetition_period column if not exists (for existing databases)
+            let has_column: Result<i32, _> = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='repetition_period'",
+                [],
+                |row| row.get(0),
+            );
+            if has_column.unwrap_or(0) == 0 {
+                conn.execute("ALTER TABLE todos ADD COLUMN repetition_period TEXT", [])
+                    .map_err(|e| e.to_string())?;
+            }
+
             Ok(())
         })
     }
@@ -82,8 +96,8 @@ impl TodoRepository for SqliteRepo {
             let priority = new_todo.priority.unwrap_or(3);
 
             conn.execute(
-                "INSERT INTO todos (todo, due_date, priority, up_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![new_todo.todo, new_todo.due_date, priority, new_todo.up_id, created, created],
+                "INSERT INTO todos (todo, due_date, priority, up_id, repetition_period, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![new_todo.todo, new_todo.due_date, priority, new_todo.up_id, new_todo.repetition_period, created, created],
             ).map_err(|e| e.to_string())?;
 
             let id = conn.last_insert_rowid();
@@ -96,7 +110,7 @@ impl TodoRepository for SqliteRepo {
     fn find_by_id(&self, id: i64) -> Result<Option<Todo>, String> {
         Self::with_conn(self, |conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, repetition_period, created_at, updated_at 
                  FROM todos WHERE id = ?1"
             ).map_err(|e| e.to_string())?;
 
@@ -112,8 +126,9 @@ impl TodoRepository for SqliteRepo {
                     done: row.get(5).map_err(|e| e.to_string())?,
                     done_at: row.get(6).map_err(|e| e.to_string())?,
                     deleted_at: row.get(7).map_err(|e| e.to_string())?,
-                    created_at: row.get(8).map_err(|e| e.to_string())?,
-                    updated_at: row.get(9).map_err(|e| e.to_string())?,
+                    repetition_period: row.get(8).map_err(|e| e.to_string())?,
+                    created_at: row.get(9).map_err(|e| e.to_string())?,
+                    updated_at: row.get(10).map_err(|e| e.to_string())?,
                 }))
             } else {
                 Ok(None)
@@ -130,11 +145,11 @@ impl TodoRepository for SqliteRepo {
     fn find_all(&self, include_done: bool) -> Result<Vec<Todo>, String> {
         Self::with_conn(self, |conn| {
             let sql = if include_done {
-                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, repetition_period, created_at, updated_at 
                  FROM todos WHERE deleted_at IS NULL
                  ORDER BY CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC, priority ASC, created_at DESC"
             } else {
-                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+                "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, repetition_period, created_at, updated_at 
                  FROM todos WHERE deleted_at IS NULL AND done != 5
                  ORDER BY CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC, priority ASC, created_at DESC"
             };
@@ -150,8 +165,9 @@ impl TodoRepository for SqliteRepo {
                     done: row.get(5)?,
                     done_at: row.get(6)?,
                     deleted_at: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    repetition_period: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             }).map_err(|e| e.to_string())?;
 
@@ -179,11 +195,16 @@ impl TodoRepository for SqliteRepo {
             } else {
                 update.up_id.or(current.up_id)
             };
+            let repetition_period = if update.clear_repetition == Some(true) {
+                None
+            } else {
+                update.repetition_period.or(current.repetition_period)
+            };
             let updated = Utc::now().format("%Y%m%dT%H%M%S").to_string();
 
             conn.execute(
-                "UPDATE todos SET todo = ?1, due_date = ?2, priority = ?3, up_id = ?4, updated_at = ?5 WHERE id = ?6",
-                params![todo, due_date, priority, up_id, updated, id],
+                "UPDATE todos SET todo = ?1, due_date = ?2, priority = ?3, up_id = ?4, repetition_period = ?5, updated_at = ?6 WHERE id = ?7",
+                params![todo, due_date, priority, up_id, repetition_period, updated, id],
             ).map_err(|e| e.to_string())?;
 
             self.find_by_id(id)?
@@ -234,7 +255,7 @@ impl TodoRepository for SqliteRepo {
     /// Find all todos including deleted (for parent lookup)
     fn find_all_including_deleted(&self) -> Result<Vec<Todo>, String> {
         Self::with_conn(self, |conn| {
-            let sql = "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+            let sql = "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, repetition_period, created_at, updated_at 
                       FROM todos ORDER BY id";
             let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
             let rows = stmt.query_map([], |row| {
@@ -247,8 +268,9 @@ impl TodoRepository for SqliteRepo {
                     done: row.get(5)?,
                     done_at: row.get(6)?,
                     deleted_at: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    repetition_period: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             }).map_err(|e| e.to_string())?;
 
@@ -264,7 +286,7 @@ impl TodoRepository for SqliteRepo {
     fn search(&self, keyword: &str) -> Result<Vec<Todo>, String> {
         Self::with_conn(self, |conn| {
             let pattern = format!("%{}%", keyword);
-            let sql = "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, created_at, updated_at 
+            let sql = "SELECT id, todo, due_date, priority, up_id, done, done_at, deleted_at, repetition_period, created_at, updated_at 
                      FROM todos WHERE todo LIKE ?1 AND deleted_at IS NULL
                      ORDER BY done ASC, priority ASC, due_date ASC, created_at DESC";
             
@@ -279,8 +301,9 @@ impl TodoRepository for SqliteRepo {
                     done: row.get(5)?,
                     done_at: row.get(6)?,
                     deleted_at: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    repetition_period: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             }).map_err(|e| e.to_string())?;
 
